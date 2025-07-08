@@ -23,6 +23,7 @@ SCREEN_HEIGHT = 900
 CELL_SIZE = 40
 BEE_SIZE = 30
 BEE_SPEED = 4
+QB_SPEED = 4
 
 SQRT3 = math.sqrt(3)
 
@@ -39,20 +40,26 @@ def hexagon(center, size):
 def distance(a, b):
     return math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
 
+def move_point(p, dx, dy):
+    return (p[0] + dx, p[1] + dy)
+
+
 class Task(object):
     pass
 
 class TravelTo(Task):
-    def __init__(self, bee, dest):
+    def __init__(self, dest):
         super().__init__()
-        self.bee = bee
         self.dest = dest
-        dist = distance(bee.center, dest)
-        self.dx = (dest[0] - bee.center[0]) / dist * BEE_SPEED
-        self.dy = (dest[1] - bee.center[1]) / dist * BEE_SPEED
     
+    def start(self, bee):
+        self.bee = bee
+        dist = distance(bee.center, self.dest)
+        self.dx = (self.dest[0] - bee.center[0]) / dist * BEE_SPEED
+        self.dy = (self.dest[1] - bee.center[1]) / dist * BEE_SPEED
+
     def update(self):
-        self.bee.center = (self.bee.center[0] + self.dx, self.bee.center[1] + self.dy)
+        self.bee.center = move_point(self.bee.center, self.dx, self.dy)
     
     def is_done(self):
         return distance(self.bee.center, self.dest) < 2
@@ -79,18 +86,22 @@ class Cell(pygame.sprite.Sprite):
 
 class Bee(pygame.sprite.Sprite):
     def __init__(self, x, y, job):
-        super().__init__() 
+        super().__init__()
         self.center = (x, y)
         self.job = job
         self.tasks = []
+        self.task = None
 
     def update(self):
-        if len(self.tasks) == 0:
-            return
-        if self.tasks[0].is_done():
+        if self.task is None or self.task.is_done():
+            if len(self.tasks) == 0:
+                self.task = None
+                return
+            self.task = self.tasks[0]
             self.tasks = self.tasks[1:]
+            self.task.start(self)
         else:
-            self.tasks[0].update()
+            self.task.update()
 
     def add_task(self, task):
         self.tasks.append(task)
@@ -113,6 +124,27 @@ class Bee(pygame.sprite.Sprite):
         pygame.draw.circle(surface, bee_color, self.center, BEE_SIZE / 2)
         pygame.gfxdraw.aacircle(surface, int(self.center[0]), int(self.center[1]), BEE_SIZE, BLACK)
 
+class QueenBee(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        super().__init__()
+        self.center = (x, y)
+
+    def update(self):
+        pressed_keys = pygame.key.get_pressed()
+        if pressed_keys[K_UP] and self.center[1] > 0:
+            self.center = move_point(self.center, 0, -QB_SPEED)
+        if pressed_keys[K_DOWN] and self.center[1] < SCREEN_HEIGHT:
+            self.center = move_point(self.center, 0, QB_SPEED)
+        if pressed_keys[K_LEFT] and self.center[0] > 0:
+            self.center = move_point(self.center, -QB_SPEED, 0)
+        if pressed_keys[K_RIGHT] and self.center[0] < SCREEN_WIDTH:
+            self.center = move_point(self.center, QB_SPEED, 0)
+    
+    def draw(self, surface):
+        pygame.draw.circle(surface, YELLOW_BEE1, self.center, BEE_SIZE)
+        pygame.draw.circle(surface, BLACK, self.center, BEE_SIZE / 2)
+        pygame.gfxdraw.aacircle(surface, int(self.center[0]), int(self.center[1]), BEE_SIZE, BLACK)
+
 
 def main():
     pygame.init()
@@ -122,8 +154,10 @@ def main():
     surface = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 
     cells = [Cell(0, 0), Cell(1, -1), Cell(1, 0)]
+    qb = QueenBee(100, 200)
     bees = [Bee(100, 100, "nurse"), Bee(200, 100, "builder"), Bee(300, 100, "cleaner"), Bee(400, 100, "food maker")]
-    bees[0].add_task(TravelTo(bees[0], cells[0].rect.center))
+    bees[0].add_task(TravelTo(cells[0].rect.center))
+    bees[0].add_task(TravelTo(cells[1].rect.center))
 
     while True:
         # Events
@@ -135,6 +169,7 @@ def main():
         # Update
         for b in bees:
             b.update()
+        qb.update()
 
         # Draw
         surface.fill(YELLOW_BG)
@@ -142,6 +177,7 @@ def main():
             c.draw(surface)
         for b in bees:
             b.draw(surface)
+        qb.draw(surface)
         
         pygame.display.update()
         FramePerSec.tick(FPS)
