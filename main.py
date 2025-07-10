@@ -109,14 +109,6 @@ def center_text2(surface, rect):
     w = surface.get_width()
     return move_point(rect.center, -w/2, 0)
 
-def button(text, color):
-    text = font_tiny.render(text, True, GRAY)
-    w = text.get_width() + 16
-    h = text.get_height() + 10
-    s = pygame.Surface((w, h))
-    pygame.draw.rect(s, color, s.get_rect())
-    s.blit(text, center_text(text, s.get_rect()))
-    return s
 
 class Button(object):
     def __init__(self, parent, text, color, x, y, fn):
@@ -142,6 +134,50 @@ class Button(object):
         self.fn()
 
 
+class Hive(object):
+    def __init__(self, bees = [], cells = []):
+        pass
+        self.bees = bees
+        self.cells = cells
+        self.cells_needing_builder = []
+        self.cells_needing_food_maker = []
+        self.cells_needing_nurse = []
+    
+    def add_bee(self, bee):
+        self.bees.append(bee)
+
+    def request_job(self, bee):
+        if bee.job == "builder" and len(self.cells_needing_builder) > 0:
+            cell = self.cells_needing_builder[0]
+            self.cells_needing_builder = self.cells_needing_builder[1:]
+            self.assign_builder(cell, bee)
+
+    def request_builder(self, cell):
+        cell.state = "build requested"
+        builder = self.get_bee("builder")
+        if builder is not None:
+            self.assign_builder(cell, builder)
+        else:
+            self.cells_needing_builder.append(cell)
+    
+    def assign_builder(self, cell, bee):
+        orig_pos = bee.center
+        bee.add_tasks([
+            TravelTo(cell.rect.center),
+            Build(cell),
+            TravelTo(orig_pos)
+        ])
+
+    def request_bee_bread(self, cell):
+        pass
+
+    def get_bee(self, job):
+        qualified_bees = [ bee for bee in self.bees if bee.job == job and not bee.is_busy() ]
+        if len(qualified_bees) > 0:
+            return qualified_bees[0]
+        return None
+
+
 class Cell(pygame.sprite.Sprite):
     def __init__(self, row, col):
         super().__init__()
@@ -152,8 +188,8 @@ class Cell(pygame.sprite.Sprite):
         self.state = "unbuilt"
         self.buttons = [
             Button(self, "Nursery", NURSE_BEE_COLOR, 20, 0, self.make_nursery),
-            Button(self, "Bee bread", FOOD_MAKER_BEE_COLOR, 20, 30, self.request_food_maker),
-            Button(self, "Honey", BUILDER_BEE_COLOR, 20, 60, self.request_food_maker),
+            Button(self, "Bee bread", FOOD_MAKER_BEE_COLOR, 20, 30, self.request_bee_bread),
+            Button(self, "Honey", BUILDER_BEE_COLOR, 20, 60, self.request_honey),
         ]
  
     def update(self):
@@ -162,12 +198,15 @@ class Cell(pygame.sprite.Sprite):
     def make_nursery(self):
         self.state = "nursery"
  
-    def request_food_maker(self):
-        food_makers = [ bee for bee in bees if bee.job == "food maker" ]
-        if len(food_makers) > 0:
+    def request_honey(self):
+        pass
+
+    def request_bee_bread(self):
+        food_maker = self.get_bee("food_maker")
+        if food_maker is not None:
             self.state = "food maker requested"
-            orig_pos = food_makers[0].center
-            food_makers[0].add_tasks([
+            orig_pos = food_maker.center
+            food_maker.add_tasks([
                 TravelTo(self.rect.center),
                 TravelTo(orig_pos)
             ])
@@ -179,7 +218,7 @@ class Cell(pygame.sprite.Sprite):
         elif self.state == "building":
             border_color = YELLOW_CELL2
             bg_color = YELLOW_CELL1
-        elif self.state == "nursery":
+        elif self.state == "nursery" or self.state == "nursery with egg":
             border_color = NURSE_BEE_COLOR
             bg_color = YELLOW_CELL3
         else:
@@ -201,23 +240,18 @@ class Cell(pygame.sprite.Sprite):
         elif self.state == "ready" and self.rect.collidepoint(pygame.mouse.get_pos()):
             for button in self.buttons:
                 button.draw(surface)
+        elif self.state == "nursery with egg":
+            pygame.draw.circle(surface, WHITE, move_point(self.rect.center, 0, CELL_SIZE), CELL_SIZE / 2)
 
 
     def handle_click(self):
         if self.state == "unbuilt":
-            builders = [ bee for bee in bees if bee.job == "builder" ]
-            if len(builders) > 0:
-                self.state = "build requested"
-                orig_pos = builders[0].center
-                builders[0].add_tasks([
-                    TravelTo(self.rect.center),
-                    Build(self),
-                    TravelTo(orig_pos)
-                ])
+            hive.request_builder(self)
         elif self.state == "ready":
             for button in self.buttons:
                 if button.get_rect().collidepoint(pygame.mouse.get_pos()):
                     button.handle_click()
+
 
 class Bee(pygame.sprite.Sprite):
     def __init__(self, x, y, job):
@@ -231,6 +265,7 @@ class Bee(pygame.sprite.Sprite):
         if self.task is None or self.task.is_done():
             if len(self.tasks) == 0:
                 self.task = None
+                hive.request_job(self)
                 return
             self.task = self.tasks[0]
             self.tasks = self.tasks[1:]
@@ -244,6 +279,9 @@ class Bee(pygame.sprite.Sprite):
     def add_tasks(self, tasks):
         for task in tasks:
             self.tasks.append(task)
+    
+    def is_busy(self):
+        return len(self.tasks) > 0 or self.task is not None
     
     def draw(self, surface):
         size = BEE_SIZE
@@ -262,6 +300,7 @@ class Bee(pygame.sprite.Sprite):
         pygame.draw.circle(surface, bee_color, self.center, size / 2)
         pygame.gfxdraw.aacircle(surface, int(self.center[0]), int(self.center[1]), int(size), BLACK)
 
+
 class QueenBee(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
@@ -277,6 +316,11 @@ class QueenBee(pygame.sprite.Sprite):
             self.center = move_point(self.center, -QB_SPEED, 0)
         if pressed_keys[K_RIGHT] and self.center[0] < SCREEN_WIDTH:
             self.center = move_point(self.center, QB_SPEED, 0)
+        if pressed_keys[K_RETURN]:
+            for cell in hive.cells:
+                if cell.state == "nursery" and cell.rect.collidepoint(self.center):
+                    cell.state = "nursery with egg"
+                    break
     
     def draw(self, surface):
         size = BEE_SIZE * 1.5
@@ -285,9 +329,12 @@ class QueenBee(pygame.sprite.Sprite):
         pygame.gfxdraw.aacircle(surface, int(self.center[0]), int(self.center[1]), int(size), BLACK)
 
 
-cells = [Cell(0, 0), Cell(1, -1), Cell(1, 0)]
+hive = Hive(
+    cells = [Cell(0, 0), Cell(1, -1), Cell(1, 0)], 
+    bees = [Bee(100, 100, "nurse"), Bee(200, 100, "builder"), Bee(300, 100, "cleaner"), Bee(400, 100, "food maker")]
+)
 qb = QueenBee(100, 200)
-bees = [Bee(100, 100, "nurse"), Bee(200, 100, "builder"), Bee(300, 100, "cleaner"), Bee(400, 100, "food maker")]
+
 
 def main():
     FramePerSec = pygame.time.Clock()
@@ -302,21 +349,21 @@ def main():
                 pygame.quit()
                 sys.exit()
             elif event.type == MOUSEBUTTONUP:
-                for cell in cells:
+                for cell in hive.cells:
                     if cell.rect.collidepoint(pygame.mouse.get_pos()):
                         cell.handle_click()
                         break
     
         # Update
-        for b in bees:
+        for b in hive.bees:
             b.update()
         qb.update()
 
         # Draw
         surface.fill(YELLOW_BG)
-        for c in cells:
+        for c in hive.cells:
             c.draw(surface)
-        for b in bees:
+        for b in hive.bees:
             b.draw(surface)
         qb.draw(surface)
         
