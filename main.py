@@ -95,6 +95,28 @@ class Build(Task):
         return self.time_remaining == 0
 
 
+class Nurse(Task):
+    def __init__(self, cell):
+        super().__init__()
+        self.cell = cell
+        self.total_time = FPS * 2
+        self.elapsed_time = 0
+    def start(self, bee):
+        self.cell.state = "nursing"
+        self.cell.progress = 0
+    def update(self):
+        self.elapsed_time += 1
+        self.cell.progress = self.elapsed_time / self.total_time
+        if self.elapsed_time == self.total_time:
+            self.cell.state = "nursery"
+            self.cell.progress = 0
+            new_bee = Bee(self.cell.rect.center[0], self.cell.rect.center[1], "unassigned")
+            hive.add_bee(new_bee)
+            new_bee.add_task(TravelTo((300, 300)))
+    def is_done(self):
+        return self.elapsed_time == self.total_time
+
+
 def center_text(surface, rect):
     w = surface.get_width()
     h = surface.get_height()
@@ -151,6 +173,10 @@ class Hive(object):
             cell = self.cells_needing_builder[0]
             self.cells_needing_builder = self.cells_needing_builder[1:]
             self.assign_builder(cell, bee)
+        elif bee.job == "nurse" and len(self.cells_needing_nurse) > 0:
+            cell = self.cells_needing_nurse[0]
+            self.cells_needing_nurse = self.cells_needing_nurse[1:]
+            self.assign_nurse(cell, bee)
 
     def request_builder(self, cell):
         cell.state = "build requested"
@@ -165,6 +191,22 @@ class Hive(object):
         bee.add_tasks([
             TravelTo(cell.rect.center),
             Build(cell),
+            TravelTo(orig_pos)
+        ])
+
+    def request_nurse(self, cell):
+        cell.state = "nurse requested"
+        nurse = self.get_bee("nurse")
+        if nurse is not None:
+            self.assign_nurse(cell, nurse)
+        else:
+            self.cells_needing_nurse.append(cell)
+    
+    def assign_nurse(self, cell, bee):
+        orig_pos = bee.center
+        bee.add_tasks([
+            TravelTo(cell.rect.center),
+            Nurse(cell),
             TravelTo(orig_pos)
         ])
 
@@ -186,6 +228,7 @@ class Cell(pygame.sprite.Sprite):
         self.rect = pygame.Rect(0, 0, CELL_SIZE * SQRT3 * 2, CELL_SIZE * 2)
         self.rect.center = (x, y)
         self.state = "unbuilt"
+        self.progress = 0
         self.buttons = [
             Button(self, "Nursery", NURSE_BEE_COLOR, 20, 0, self.make_nursery),
             Button(self, "Bee bread", FOOD_MAKER_BEE_COLOR, 20, 30, self.request_bee_bread),
@@ -218,7 +261,7 @@ class Cell(pygame.sprite.Sprite):
         elif self.state == "building":
             border_color = YELLOW_CELL2
             bg_color = YELLOW_CELL1
-        elif self.state == "nursery" or self.state == "nursery with egg":
+        elif self.state in ["nursery", "nursery with egg", "nurse requested", "nursing"]:
             border_color = NURSE_BEE_COLOR
             bg_color = YELLOW_CELL3
         else:
@@ -240,8 +283,8 @@ class Cell(pygame.sprite.Sprite):
         elif self.state == "ready" and self.rect.collidepoint(pygame.mouse.get_pos()):
             for button in self.buttons:
                 button.draw(surface)
-        elif self.state == "nursery with egg":
-            pygame.draw.circle(surface, WHITE, move_point(self.rect.center, 0, CELL_SIZE), CELL_SIZE / 2)
+        if self.state in ["nursery with egg", "nurse requested", "nursing"]:
+            pygame.draw.circle(surface, WHITE, move_point(self.rect.center, 0, CELL_SIZE), CELL_SIZE / 4 * (1 + self.progress))
 
 
     def handle_click(self):
@@ -285,7 +328,7 @@ class Bee(pygame.sprite.Sprite):
     
     def draw(self, surface):
         size = BEE_SIZE
-        bee_color = YELLOW_BEE1
+        bee_color = GRAY
         if self.job == "nurse":            
             bee_color = NURSE_BEE_COLOR
         elif self.job == "builder":
@@ -320,6 +363,7 @@ class QueenBee(pygame.sprite.Sprite):
             for cell in hive.cells:
                 if cell.state == "nursery" and cell.rect.collidepoint(self.center):
                     cell.state = "nursery with egg"
+                    hive.request_nurse(cell)
                     break
     
     def draw(self, surface):
