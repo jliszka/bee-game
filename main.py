@@ -135,7 +135,7 @@ class Clean(Task):
         self.elapsed_time += 1
         self.cell.progress = self.elapsed_time / self.total_time
         if self.elapsed_time == self.total_time:
-            self.cell.state = ""
+            self.cell.state = self.cell.type
     def is_done(self):
         return self.elapsed_time == self.total_time
 
@@ -219,11 +219,9 @@ class Hive(object):
             self.cells_needing_builder.append(cell)
     
     def assign_builder(self, cell, bee):
-        orig_pos = bee.center
         bee.add_tasks([
             TravelTo(cell.rect.center),
             Build(cell),
-            TravelTo(orig_pos)
         ])
 
     def request_nurse(self, cell):
@@ -235,11 +233,9 @@ class Hive(object):
             self.cells_needing_nurse.append(cell)
     
     def assign_nurse(self, cell, bee):
-        orig_pos = bee.center
         bee.add_tasks([
             TravelTo(cell.rect.center),
             Nurse(cell),
-            TravelTo(orig_pos)
         ])
 
     def request_food_maker(self, cell):
@@ -262,11 +258,9 @@ class Hive(object):
             self.cells_needing_cleaner.append(cell)
 
     def assign_cleaner(self, cell, bee):
-        orig_pos = bee.center
         bee.add_tasks([
             TravelTo(cell.rect.center),
             Clean(cell),
-            TravelTo(orig_pos)
         ])
 
     def get_bee(self, job):
@@ -360,23 +354,29 @@ class Bee(pygame.sprite.Sprite):
         self.job = job
         self.tasks = []
         self.task = None
+        self.is_idle = True
 
     def update(self):
         if self.task is None or self.task.is_done():
             if len(self.tasks) == 0:
-                self.task = None
                 hive.request_job(self)
-                return
-            self.task = self.tasks[0]
-            self.tasks = self.tasks[1:]
-            self.task.start(self)
+                if len(self.tasks) == 0 and self.job != "unassigned":
+                    self.task = TravelTo((random.randint(100, 400), random.randint(100, 400)))
+                    self.task.start(self)
+                    self.is_idle = True
+            else:
+                self.task = self.tasks[0]
+                self.tasks = self.tasks[1:]
+                self.task.start(self)
         else:
             self.task.update()
 
     def add_task(self, task):
+        self.is_idle = False
         self.tasks.append(task)
     
     def add_tasks(self, tasks):
+        self.is_idle = False
         for task in tasks:
             self.tasks.append(task)
     
