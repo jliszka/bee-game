@@ -1,12 +1,15 @@
 import pygame, sys
 import pygame.gfxdraw
 from pygame.locals import *
+import random
 import math
+from collections import defaultdict
 
 FPS = 60
 
 BLACK = (0, 0, 0)
 GRAY = (127, 127, 127)
+LIGHT_GRAY = (230, 230, 230)
 WHITE = (255, 255, 255)
 YELLOW_BG = (255, 255, 200)
 YELLOW_CELL1 = (230, 230, 150)
@@ -91,6 +94,7 @@ class Build(Task):
         self.time_remaining -= 1
         if self.time_remaining == 0:
             self.cell.state = "ready"
+            self.cell.type = "built"
     def is_done(self):
         return self.time_remaining == 0
 
@@ -108,11 +112,30 @@ class Nurse(Task):
         self.elapsed_time += 1
         self.cell.progress = self.elapsed_time / self.total_time
         if self.elapsed_time == self.total_time:
-            self.cell.state = "nursery"
+            self.cell.state = "cleaner requested"
+            hive.request_cleaner(self.cell)
             self.cell.progress = 0
             new_bee = Bee(self.cell.rect.center[0], self.cell.rect.center[1], "unassigned")
             hive.add_bee(new_bee)
-            new_bee.add_task(TravelTo((300, 300)))
+            new_bee.add_task(TravelTo((random.randint(200, 400), SCREEN_HEIGHT-200)))
+    def is_done(self):
+        return self.elapsed_time == self.total_time
+
+
+class Clean(Task):
+    def __init__(self, cell):
+        super().__init__()
+        self.cell = cell
+        self.total_time = FPS * 2
+        self.elapsed_time = 0
+    def start(self, bee):
+        self.cell.state = "cleaning"
+        self.cell.progress = 0
+    def update(self):
+        self.elapsed_time += 1
+        self.cell.progress = self.elapsed_time / self.total_time
+        if self.elapsed_time == self.total_time:
+            self.cell.state = ""
     def is_done(self):
         return self.elapsed_time == self.total_time
 
@@ -164,6 +187,7 @@ class Hive(object):
         self.cells_needing_builder = []
         self.cells_needing_food_maker = []
         self.cells_needing_nurse = []
+        self.cells_needing_cleaner = []
     
     def add_bee(self, bee):
         self.bees.append(bee)
@@ -177,6 +201,14 @@ class Hive(object):
             cell = self.cells_needing_nurse[0]
             self.cells_needing_nurse = self.cells_needing_nurse[1:]
             self.assign_nurse(cell, bee)
+        elif bee.job == "food maker" and len(self.cells_needing_food_maker) > 0:
+            cell = self.cells_needing_food_maker[0]
+            self.cells_needing_food_maker = self.cells_needing_food_maker[1:]
+            self.assign_food_maker(cell, bee)
+        elif bee.job == "cleaner" and len(self.cells_needing_cleaner) > 0:
+            cell = self.cells_needing_cleaner[0]
+            self.cells_needing_cleaner = self.cells_needing_cleaner[1:]
+            self.assign_cleaner(cell, bee)
 
     def request_builder(self, cell):
         cell.state = "build requested"
@@ -210,8 +242,32 @@ class Hive(object):
             TravelTo(orig_pos)
         ])
 
-    def request_bee_bread(self, cell):
+    def request_food_maker(self, cell):
+        cell.state = "food maker requested"
+        food_maker = self.get_bee("food maker")
+        if food_maker is not None:
+            self.assign_food_maker(cell, food_maker)
+        else:
+            self.cells_needing_food_maker.append(cell)
+
+    def assign_food_maker(self, cell, bee):
         pass
+
+    def request_cleaner(self, cell):
+        cell.state = "cleaner requested"
+        cleaner = self.get_bee("cleaner")
+        if cleaner is not None:
+            self.assign_cleaner(cell, cleaner)
+        else:
+            self.cells_needing_cleaner.append(cell)
+
+    def assign_cleaner(self, cell, bee):
+        orig_pos = bee.center
+        bee.add_tasks([
+            TravelTo(cell.rect.center),
+            Clean(cell),
+            TravelTo(orig_pos)
+        ])
 
     def get_bee(self, job):
         qualified_bees = [ bee for bee in self.bees if bee.job == job and not bee.is_busy() ]
@@ -227,6 +283,7 @@ class Cell(pygame.sprite.Sprite):
         x = SCREEN_WIDTH / 2 + (col * 2 + row % 2) * CELL_SIZE * SQRT3
         self.rect = pygame.Rect(0, 0, CELL_SIZE * SQRT3 * 2, CELL_SIZE * 2)
         self.rect.center = (x, y)
+        self.type = "unbuilt"
         self.state = "unbuilt"
         self.progress = 0
         self.buttons = [
@@ -239,44 +296,45 @@ class Cell(pygame.sprite.Sprite):
         pass
 
     def make_nursery(self):
+        self.type = "nursery"
         self.state = "nursery"
  
     def request_honey(self):
-        pass
+        self.type = "honey"
+        hive.request_food_maker(self)
 
     def request_bee_bread(self):
-        food_maker = self.get_bee("food_maker")
-        if food_maker is not None:
-            self.state = "food maker requested"
-            orig_pos = food_maker.center
-            food_maker.add_tasks([
-                TravelTo(self.rect.center),
-                TravelTo(orig_pos)
-            ])
+        self.type = "bee bread"
+        hive.request_food_maker(self)
 
     def draw(self, surface):
-        if self.state == "unbuilt" or self.state == "build requested":
-            border_color = YELLOW_CELL1
-            bg_color = YELLOW_CELL2
-        elif self.state == "building":
-            border_color = YELLOW_CELL2
-            bg_color = YELLOW_CELL1
-        elif self.state in ["nursery", "nursery with egg", "nurse requested", "nursing"]:
+        if self.type == "unbuilt":
+            if self.state == "building":
+                border_color = YELLOW_CELL2
+                bg_color = YELLOW_CELL1
+            else:
+                border_color = YELLOW_CELL1
+                bg_color = YELLOW_CELL2
+        elif self.type == "nursery":
             border_color = NURSE_BEE_COLOR
             bg_color = YELLOW_CELL3
         else:
             border_color = BUILDER_BEE_COLOR
             bg_color = YELLOW_CELL3
+        if self.state == "cleaner requested" or self.state == "cleaning":
+            bg_color = LIGHT_GRAY
+
         points = hexagon(self.rect.center, CELL_SIZE)
         pygame.draw.polygon(surface, bg_color, points)
         inner_points = hexagon(self.rect.center, CELL_SIZE-2)
         pygame.draw.polygon(surface, border_color, inner_points, width=7)
         pygame.draw.aalines(surface, BLACK, closed=True, points=points)
-        if self.state == "unbuilt" and self.rect.collidepoint(pygame.mouse.get_pos()):
-            surface.blit(build_text, center_text(build_text, self.rect))
-        elif self.state == "build requested":
-            surface.blit(build_text, center_text1(build_text, self.rect))
-            surface.blit(requested_text, center_text2(requested_text, self.rect))
+        if self.type == "unbuilt":
+            if self.state == "unbuilt" and self.rect.collidepoint(pygame.mouse.get_pos()):
+                surface.blit(build_text, center_text(build_text, self.rect))
+            elif self.state == "build requested":
+                surface.blit(build_text, center_text1(build_text, self.rect))
+                surface.blit(requested_text, center_text2(requested_text, self.rect))
         elif self.state == "nurse requested":
             surface.blit(nurse_text, center_text1(nurse_text, self.rect))
             surface.blit(requested_text, center_text2(requested_text, self.rect))
@@ -285,7 +343,6 @@ class Cell(pygame.sprite.Sprite):
                 button.draw(surface)
         if self.state in ["nursery with egg", "nurse requested", "nursing"]:
             pygame.draw.circle(surface, WHITE, move_point(self.rect.center, 0, CELL_SIZE), CELL_SIZE / 4 * (1 + self.progress))
-
 
     def handle_click(self):
         if self.state == "unbuilt":
