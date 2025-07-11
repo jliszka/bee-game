@@ -37,7 +37,6 @@ font = pygame.font.SysFont("Verdana", 60)
 font_small = pygame.font.SysFont("Verdana", 20)
 font_tiny = pygame.font.SysFont("Verdana", 14)
 build_text = font_small.render("Build", True, GRAY)
-nurse_text = font_small.render("Nurse", True, GRAY)
 requested_text = font_small.render("Requested", True, GRAY)
 
 
@@ -81,7 +80,7 @@ class TravelTo(Task):
         self.bee.center = move_point(self.bee.center, self.dx, self.dy)
     
     def is_done(self):
-        return distance(self.bee.center, self.dest) < 2
+        return distance(self.bee.center, self.dest) < 10
 
 class Build(Task):
     def __init__(self, cell):
@@ -97,7 +96,6 @@ class Build(Task):
             self.cell.type = "built"
     def is_done(self):
         return self.time_remaining == 0
-
 
 class Nurse(Task):
     def __init__(self, cell):
@@ -116,8 +114,8 @@ class Nurse(Task):
             hive.request_cleaner(self.cell)
             self.cell.progress = 0
             new_bee = Bee(self.cell.rect.center[0], self.cell.rect.center[1], "unassigned")
+            new_bee.add_task(TravelTo((random.randint(job_rect.left, job_rect.right), random.randint(job_rect.top, job_rect.bottom))))
             hive.add_bee(new_bee)
-            new_bee.add_task(TravelTo((random.randint(200, 400), SCREEN_HEIGHT-200)))
     def is_done(self):
         return self.elapsed_time == self.total_time
 
@@ -133,7 +131,6 @@ class Clean(Task):
         self.cell.progress = 0
     def update(self):
         self.elapsed_time += 1
-        self.cell.progress = self.elapsed_time / self.total_time
         if self.elapsed_time == self.total_time:
             self.cell.state = self.cell.type
     def is_done(self):
@@ -159,7 +156,7 @@ class Button(object):
     def __init__(self, parent, text, color, x, y, fn):
         self.parent = parent
         self.fn = fn
-        self.pos = move_point(parent.rect.topleft, x, y)
+        self.pos = (x, y)
         self.rendered_text = font_tiny.render(text, True, GRAY)
         w = self.rendered_text.get_width() + 16
         h = self.rendered_text.get_height() + 10
@@ -168,11 +165,11 @@ class Button(object):
         self.button_surface.blit(self.rendered_text, center_text(self.rendered_text, self.button_surface.get_rect()))
 
     def draw(self, surface):
-        surface.blit(self.button_surface, self.pos)
+        surface.blit(self.button_surface, self.get_rect().topleft)
 
     def get_rect(self):
         rect = self.button_surface.get_rect()
-        rect.topleft = self.pos
+        rect.midtop = move_point(self.parent.rect.midtop, self.pos[0], self.pos[1])
         return rect
 
     def handle_click(self):
@@ -188,9 +185,27 @@ class Hive(object):
         self.cells_needing_food_maker = []
         self.cells_needing_nurse = []
         self.cells_needing_cleaner = []
-    
+        self.bees_needing_jobs = []
+        self.next_id = 1
+        for bee in bees:
+            self.assign_id(bee)
+
+    def assign_id(self, bee):
+        bee.id = self.next_id
+        self.next_id += 1
+
     def add_bee(self, bee):
+        self.assign_id(bee)
+        self.bees_needing_jobs.append(bee)
         self.bees.append(bee)
+
+    def is_first_bee_waiting_for_job(self, bee):
+        return len(self.bees_needing_jobs) > 0 and bee.id == self.bees_needing_jobs[0].id
+
+    def assign_job(self, job):
+        if len(self.bees_needing_jobs) > 0:
+            self.bees_needing_jobs[0].job = job
+            self.bees_needing_jobs = self.bees_needing_jobs[1:]
 
     def request_job(self, bee):
         if bee.job == "builder" and len(self.cells_needing_builder) > 0:
@@ -281,9 +296,9 @@ class Cell(pygame.sprite.Sprite):
         self.state = "unbuilt"
         self.progress = 0
         self.buttons = [
-            Button(self, "Nursery", NURSE_BEE_COLOR, 20, 0, self.make_nursery),
-            Button(self, "Bee bread", FOOD_MAKER_BEE_COLOR, 20, 30, self.request_bee_bread),
-            Button(self, "Honey", BUILDER_BEE_COLOR, 20, 60, self.request_honey),
+            Button(self, "Nursery", NURSE_BEE_COLOR, 0, 0, self.make_nursery),
+            Button(self, "Bee bread", FOOD_MAKER_BEE_COLOR, 0, 30, self.request_bee_bread),
+            Button(self, "Honey", BUILDER_BEE_COLOR, 0, 60, self.request_honey),
         ]
  
     def update(self):
@@ -329,9 +344,6 @@ class Cell(pygame.sprite.Sprite):
             elif self.state == "build requested":
                 surface.blit(build_text, center_text1(build_text, self.rect))
                 surface.blit(requested_text, center_text2(requested_text, self.rect))
-        elif self.state == "nurse requested":
-            surface.blit(nurse_text, center_text1(nurse_text, self.rect))
-            surface.blit(requested_text, center_text2(requested_text, self.rect))
         elif self.state == "ready" and self.rect.collidepoint(pygame.mouse.get_pos()):
             for button in self.buttons:
                 button.draw(surface)
@@ -350,20 +362,35 @@ class Cell(pygame.sprite.Sprite):
 class Bee(pygame.sprite.Sprite):
     def __init__(self, x, y, job):
         super().__init__()
+        self.rect = pygame.Rect(0, 0, BEE_SIZE, BEE_SIZE)
         self.center = (x, y)
         self.job = job
         self.tasks = []
         self.task = None
         self.is_idle = True
+        self.buttons = [
+            Button(self, "(N)urse", NURSE_BEE_COLOR, 0, 20, self.make_nurse),
+            Button(self, "(C)leaner", CLEANER_BEE_COLOR, 0, 50, self.make_cleaner),
+        ]
+
+    def make_nurse(self):
+        self.job = "nurse"
+    
+    def make_cleaner(self):
+        self.job = "cleaner"
 
     def update(self):
         if self.task is None or self.task.is_done():
             if len(self.tasks) == 0:
-                hive.request_job(self)
-                if len(self.tasks) == 0 and self.job != "unassigned":
-                    self.task = TravelTo((random.randint(100, 400), random.randint(100, 400)))
-                    self.task.start(self)
+                if self.job == "unassigned":
+                    self.task = None
                     self.is_idle = True
+                else:
+                    hive.request_job(self)
+                    if len(self.tasks) == 0:
+                        self.task = TravelTo((random.randint(100, 400), random.randint(100, 400)))
+                        self.task.start(self)
+                        self.is_idle = True
             else:
                 self.task = self.tasks[0]
                 self.tasks = self.tasks[1:]
@@ -381,8 +408,14 @@ class Bee(pygame.sprite.Sprite):
             self.tasks.append(task)
     
     def is_busy(self):
-        return len(self.tasks) > 0 or self.task is not None
+        return not self.is_idle
     
+    def handle_click(self):
+        if self.job == "unassigned":
+            for button in self.buttons:
+                if button.get_rect().collidepoint(pygame.mouse.get_pos()):
+                    button.handle_click()
+
     def draw(self, surface):
         size = BEE_SIZE
         bee_color = GRAY
@@ -399,6 +432,15 @@ class Bee(pygame.sprite.Sprite):
         pygame.draw.circle(surface, YELLOW_BEE1, self.center, size)
         pygame.draw.circle(surface, bee_color, self.center, size / 2)
         pygame.gfxdraw.aacircle(surface, int(self.center[0]), int(self.center[1]), int(size), BLACK)
+        # id_text = font_small.render(str(self.id), True, BLACK)
+        # surface.blit(id_text, self.center)
+        if self.job == "unassigned":
+            self.rect = pygame.Rect(0, 0, size * 2, size * 4)
+            self.rect.midbottom = self.center
+            if not self.is_busy() and hive.is_first_bee_waiting_for_job(self) and job_rect.collidepoint(self.center):
+            #if not self.is_busy() and job_rect.collidepoint(self.center):
+                for button in self.buttons:
+                    button.draw(surface)
 
 
 class QueenBee(pygame.sprite.Sprite):
@@ -434,8 +476,8 @@ hive = Hive(
     cells = [Cell(0, 0), Cell(1, -1), Cell(1, 0)], 
     bees = [Bee(100, 100, "nurse"), Bee(200, 100, "builder"), Bee(300, 100, "cleaner"), Bee(400, 100, "food maker")]
 )
-qb = QueenBee(100, 200)
-
+qb = QueenBee(SCREEN_WIDTH - 200, 200)
+job_rect = pygame.Rect(50, SCREEN_HEIGHT * 2 / 3, SCREEN_HEIGHT / 3, SCREEN_HEIGHT / 3 - 50)
 
 def main():
     FramePerSec = pygame.time.Clock()
@@ -454,7 +496,17 @@ def main():
                     if cell.rect.collidepoint(pygame.mouse.get_pos()):
                         cell.handle_click()
                         break
-    
+                else:
+                    for bee in hive.bees:
+                        if bee.rect.collidepoint(pygame.mouse.get_pos()):
+                            bee.handle_click()
+                            break
+            elif event.type == KEYUP:
+                if event.key == K_n:
+                    hive.assign_job("nurse")
+                elif event.key == K_c:
+                    hive.assign_job("cleaner")
+
         # Update
         for b in hive.bees:
             b.update()
@@ -462,6 +514,8 @@ def main():
 
         # Draw
         surface.fill(YELLOW_BG)
+        pygame.draw.circle(surface, BUILDER_BEE_COLOR, (0, SCREEN_HEIGHT), SCREEN_HEIGHT / 2)
+        # pygame.draw.rect(surface, BLACK, job_rect, 1)
         for c in hive.cells:
             c.draw(surface)
         for b in hive.bees:
