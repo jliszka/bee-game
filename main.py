@@ -39,7 +39,6 @@ font_tiny = pygame.font.SysFont("Verdana", 14)
 build_text = font_small.render("Build", True, GRAY)
 requested_text = font_small.render("Requested", True, GRAY)
 
-
 def hexagon(center, size):
     return [
             (center[0], center[1] + 2 * size),
@@ -186,6 +185,7 @@ class Hive(object):
         self.cells_needing_nurse = []
         self.cells_needing_cleaner = []
         self.bees_needing_jobs = []
+        self.debug = False
         self.next_id = 1
         for bee in bees:
             self.assign_id(bee)
@@ -432,13 +432,13 @@ class Bee(pygame.sprite.Sprite):
         pygame.draw.circle(surface, YELLOW_BEE1, self.center, size)
         pygame.draw.circle(surface, bee_color, self.center, size / 2)
         pygame.gfxdraw.aacircle(surface, int(self.center[0]), int(self.center[1]), int(size), BLACK)
-        # id_text = font_small.render(str(self.id), True, BLACK)
-        # surface.blit(id_text, self.center)
+        if hive.debug:
+            id_text = font_small.render(str(self.id), True, BLACK)
+            surface.blit(id_text, self.center)
         if self.job == "unassigned":
             self.rect = pygame.Rect(0, 0, size * 2, size * 4)
             self.rect.midbottom = self.center
             if not self.is_busy() and hive.is_first_bee_waiting_for_job(self) and job_rect.collidepoint(self.center):
-            #if not self.is_busy() and job_rect.collidepoint(self.center):
                 for button in self.buttons:
                     button.draw(surface)
 
@@ -506,6 +506,8 @@ def main():
                     hive.assign_job("nurse")
                 elif event.key == K_c:
                     hive.assign_job("cleaner")
+                elif event.key == K_d:
+                    hive.debug = not hive.debug
 
         # Update
         for b in hive.bees:
@@ -515,7 +517,8 @@ def main():
         # Draw
         surface.fill(YELLOW_BG)
         pygame.draw.circle(surface, BUILDER_BEE_COLOR, (0, SCREEN_HEIGHT), SCREEN_HEIGHT / 2)
-        # pygame.draw.rect(surface, BLACK, job_rect, 1)
+        if hive.debug:
+            pygame.draw.rect(surface, BLACK, job_rect, 1)
         for c in hive.cells:
             c.draw(surface)
         for b in hive.bees:
