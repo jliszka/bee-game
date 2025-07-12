@@ -56,6 +56,8 @@ def distance(a, b):
 def move_point(p, dx, dy):
     return (p[0] + dx, p[1] + dy)
 
+def random_in_rect(rect):
+    return (random.randint(rect.left, rect.right), random.randint(rect.top, rect.bottom))
 
 class Task(object):
     def start(self, bee):
@@ -114,11 +116,10 @@ class Nurse(Task):
             hive.request_cleaner(self.cell)
             self.cell.progress = 0
             new_bee = Bee(self.cell.rect.center[0], self.cell.rect.center[1], "unassigned")
-            new_bee.add_task(TravelTo((random.randint(job_rect.left, job_rect.right), random.randint(job_rect.top, job_rect.bottom))))
+            new_bee.add_task(TravelTo(random_in_rect(job_rect)))
             hive.add_bee(new_bee)
     def is_done(self):
         return self.elapsed_time == self.total_time
-
 
 class Clean(Task):
     def __init__(self, cell):
@@ -133,6 +134,43 @@ class Clean(Task):
         self.elapsed_time += 1
         if self.elapsed_time == self.total_time:
             self.cell.state = self.cell.type
+    def is_done(self):
+        return self.elapsed_time == self.total_time
+
+class MakeFood(Task):
+    def __init__(self, cell):
+        super().__init__()
+        self.cell = cell
+        self.total_time = FPS * 2
+        self.elapsed_time = 0
+    def start(self, bee):
+        self.cell.state = "making food"
+        self.cell.progress = 0
+    def update(self):
+        self.elapsed_time += 1
+        self.cell.progress = self.elapsed_time / self.total_time
+        if self.elapsed_time == self.total_time:
+            if self.cell.type == "honey":
+                hive.honey += 4
+            elif self.cell.type == "bee bread":
+                hive.bee_bread += 1
+            self.cell.state = "cleaner requested"
+            hive.request_cleaner(self.cell)
+            self.cell.progress = 0
+    def is_done(self):
+        return self.elapsed_time == self.total_time
+
+class Die(Task):
+    def __init__(self):
+        super().__init__()
+        self.total_time = FPS * 2
+        self.elapsed_time = 0
+    def start(self, bee):
+        self.bee = bee
+    def update(self):
+        self.elapsed_time += 1
+        if self.elapsed_time == self.total_time:
+            hive.remove_bee(self.bee)
     def is_done(self):
         return self.elapsed_time == self.total_time
 
@@ -203,13 +241,18 @@ class Hive(object):
         self.bees.append(bee)
         self.bee_bread -= 1
 
+    def remove_bee(self, bee):
+        self.bees = [ b for b in self.bees if b.id != bee.id ]
+
     def is_first_bee_waiting_for_job(self, bee):
         return len(self.bees_needing_jobs) > 0 and bee.id == self.bees_needing_jobs[0].id
 
     def assign_job(self, job):
         if len(self.bees_needing_jobs) > 0:
-            self.bees_needing_jobs[0].job = job
-            self.bees_needing_jobs = self.bees_needing_jobs[1:]
+            bee = self.bees_needing_jobs[0]
+            if (bee.job == "unassigned" and job in ["nurse", "cleaner"]) or (bee.job == "unassigned2" and job in ["food maker", "builder"]):
+                bee.job = job
+                self.bees_needing_jobs = self.bees_needing_jobs[1:]
 
     def request_job(self, bee):
         if bee.job == "builder" and len(self.cells_needing_builder) > 0:
@@ -266,7 +309,10 @@ class Hive(object):
             self.cells_needing_food_maker.append(cell)
 
     def assign_food_maker(self, cell, bee):
-        pass
+        bee.add_tasks([
+            TravelTo(cell.rect.center),
+            MakeFood(cell),
+        ])
 
     def request_cleaner(self, cell):
         cell.state = "cleaner requested"
@@ -335,7 +381,10 @@ class Cell(pygame.sprite.Sprite):
         ]
  
     def update(self):
-        pass
+        if self.type == "bee bread" and self.state == "bee bread":
+            hive.request_food_maker(self)
+        if self.type == "honey" and self.state == "honey":
+            hive.request_food_maker(self)
 
     def make_nursery(self):
         self.type = "nursery"
@@ -388,6 +437,15 @@ class Cell(pygame.sprite.Sprite):
                 button.draw(surface)
         if self.state in ["nursery with egg", "nurse requested", "nursing"]:
             pygame.draw.circle(surface, WHITE, move_point(self.rect.center, 0, CELL_SIZE), CELL_SIZE / 4 * (1 + self.progress))
+        if self.type == "bee bread" and self.state == "making food":
+            size = CELL_SIZE / 4 * (1 + self.progress)
+            rect = pygame.Rect(0, 0, size, size)
+            rect.center = move_point(self.rect.center, 0, CELL_SIZE)
+            pygame.draw.rect(surface, FOOD_MAKER_BEE_COLOR, rect)
+        elif self.type == "honey" and self.state == "making food":
+            size = CELL_SIZE / 8 * (1 + self.progress)
+            hex = hexagon(move_point(self.rect.center, 0, CELL_SIZE), size)
+            pygame.draw.polygon(surface, BUILDER_BEE_COLOR, hex)
 
     def handle_click(self):
         if self.state == "unbuilt":
@@ -407,11 +465,18 @@ class Bee(pygame.sprite.Sprite):
         self.tasks = []
         self.task = None
         self.is_idle = True
-        self.buttons = [
-            Button(self, "(N)urse", NURSE_BEE_COLOR, 0, 20, self.make_nurse),
-            Button(self, "(C)leaner", CLEANER_BEE_COLOR, 0, 50, self.make_cleaner),
-        ]
+        self.buttons = {
+            "unassigned": [
+                Button(self, "(N)urse", NURSE_BEE_COLOR, 0, 20, self.make_nurse),
+                Button(self, "(C)leaner", CLEANER_BEE_COLOR, 0, 50, self.make_cleaner),
+            ],
+            "unassigned2": [
+                Button(self, "(F)ood Maker", FOOD_MAKER_BEE_COLOR, 0, 20, self.make_food_maker),
+                Button(self, "(B)uilder", YELLOW_BEE1, 0, 50, self.make_builder),
+            ]
+        }
         self.time_since_last_meal = 0
+        self.meals = 0
 
     def make_nurse(self):
         self.job = "nurse"
@@ -419,21 +484,38 @@ class Bee(pygame.sprite.Sprite):
     def make_cleaner(self):
         self.job = "cleaner"
 
+    def make_food_maker(self):
+        self.job = "food_maker"
+
+    def make_builder(self):
+        self.job = "builder"
+
     def update(self):
         self.time_since_last_meal += 1
-        if self.time_since_last_meal > 30 * FPS:
+        if self.time_since_last_meal > 20 * FPS:
             hive.honey -= 1
+            self.meals += 1
             self.time_since_last_meal = 0
 
         if self.task is None or self.task.is_done():
+            if self.meals == 3 and self.job in ["nurse", "cleaner"]:
+                self.job = "unassigned2"
+                hive.bees_needing_jobs.append(self)
+                self.add_task(TravelTo(random_in_rect(job_rect)))
+            if self.meals == 6:
+                self.add_tasks([
+                    TravelTo(random_in_rect(die_rect)),
+                    Die(),
+                ])
+
             if len(self.tasks) == 0:
-                if self.job == "unassigned":
+                if self.job in ["unassigned", "unassigned2"]:
                     self.task = None
                     self.is_idle = True
                 else:
                     hive.request_job(self)
                     if len(self.tasks) == 0:
-                        self.task = TravelTo((random.randint(100, 400), random.randint(100, 400)))
+                        self.task = TravelTo(random_in_rect(idle_rect))
                         self.task.start(self)
                         self.is_idle = True
             else:
@@ -456,7 +538,7 @@ class Bee(pygame.sprite.Sprite):
         return not self.is_idle
     
     def handle_click(self):
-        if self.job == "unassigned":
+        if self.job in ["unassigned", "unassigned2"]:
             for button in self.buttons:
                 if button.get_rect().collidepoint(pygame.mouse.get_pos()):
                     button.handle_click()
@@ -474,17 +556,19 @@ class Bee(pygame.sprite.Sprite):
         elif self.job == "food maker":
             bee_color = FOOD_MAKER_BEE_COLOR
             size *= 1.2
+        elif self.job == "unassigned2":
+            size *= 1.2
         pygame.draw.circle(surface, YELLOW_BEE1, self.center, size)
         pygame.draw.circle(surface, bee_color, self.center, size / 2)
         pygame.gfxdraw.aacircle(surface, int(self.center[0]), int(self.center[1]), int(size), BLACK)
         if hive.debug:
             id_text = font_small.render(str(self.id), True, BLACK)
             surface.blit(id_text, self.center)
-        if self.job == "unassigned":
-            self.rect = pygame.Rect(0, 0, size * 2, size * 4)
+        if self.job in ["unassigned", "unassigned2"]:
+            self.rect = pygame.Rect(0, 0, BEE_SIZE * 2, BEE_SIZE * 4)
             self.rect.midbottom = self.center
             if not self.is_busy() and hive.is_first_bee_waiting_for_job(self) and job_rect.collidepoint(self.center):
-                for button in self.buttons:
+                for button in self.buttons[self.job]:
                     button.draw(surface)
 
 
@@ -523,6 +607,8 @@ hive = Hive(
 )
 qb = QueenBee(SCREEN_WIDTH - 200, 200)
 job_rect = pygame.Rect(50, SCREEN_HEIGHT * 2 / 3, SCREEN_HEIGHT / 3, SCREEN_HEIGHT / 3 - 50)
+die_rect = pygame.Rect(SCREEN_WIDTH * 2 / 3, SCREEN_HEIGHT * 2 / 3, SCREEN_HEIGHT / 3, SCREEN_HEIGHT / 3 - 50)
+idle_rect = pygame.Rect(100, 100, 400, 300)
 
 def main():
     FramePerSec = pygame.time.Clock()
@@ -551,12 +637,18 @@ def main():
                     hive.assign_job("nurse")
                 elif event.key == K_c:
                     hive.assign_job("cleaner")
+                elif event.key == K_f:
+                    hive.assign_job("food maker")
+                elif event.key == K_b:
+                    hive.assign_job("builder")
                 elif event.key == K_d:
                     hive.debug = not hive.debug
 
         # Update
-        for b in hive.bees:
-            b.update()
+        for bee in hive.bees:
+            bee.update()
+        for cell in hive.cells:
+            cell.update()
         qb.update()
 
         # Draw
@@ -564,6 +656,7 @@ def main():
         pygame.draw.circle(surface, BUILDER_BEE_COLOR, (0, SCREEN_HEIGHT), SCREEN_HEIGHT / 2)
         if hive.debug:
             pygame.draw.rect(surface, BLACK, job_rect, 1)
+            pygame.draw.rect(surface, BLACK, die_rect, 1)
         for c in hive.cells:
             c.draw(surface)
         for b in hive.bees:
