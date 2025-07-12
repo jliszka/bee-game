@@ -24,16 +24,18 @@ BUILDER_BEE_COLOR = (255, 200, 100)
 CLEANER_BEE_COLOR = (120, 180, 255)
 FOOD_MAKER_BEE_COLOR = (100, 200, 150)
 
-SCREEN_WIDTH = 1600
-SCREEN_HEIGHT = 900
-CELL_SIZE = 40
-BEE_SIZE = 30
+pygame.init()
+
+display_info = pygame.display.Info()
+SCREEN_WIDTH = display_info.current_w
+SCREEN_HEIGHT = display_info.current_h
+CELL_SIZE = SCREEN_WIDTH / 40
+BEE_SIZE = SCREEN_HEIGHT / 30
 BEE_SPEED = 4
 QB_SPEED = 4
 
 SQRT3 = math.sqrt(3)
 
-pygame.init()
 font = pygame.font.SysFont("Verdana", 60)
 font_medium = pygame.font.SysFont("Verdana", 30)
 font_small = pygame.font.SysFont("Verdana", 20)
