@@ -4,6 +4,7 @@ from pygame.locals import *
 import random
 import math
 from collections import defaultdict
+import itertools
 
 FPS = 60
 
@@ -90,12 +91,14 @@ class Build(Task):
         self.cell = cell
     def start(self, bee):
         self.cell.state = "building"
-        self.time_remaining = FPS * 2
+        self.time_remaining = FPS * 3
     def update(self):
         self.time_remaining -= 1
         if self.time_remaining == 0:
             self.cell.state = "ready"
             self.cell.type = "built"
+            hive.enable_cells()
+
     def is_done(self):
         return self.time_remaining == 0
 
@@ -103,7 +106,7 @@ class Nurse(Task):
     def __init__(self, cell):
         super().__init__()
         self.cell = cell
-        self.total_time = FPS * 2
+        self.total_time = FPS * 5
         self.elapsed_time = 0
     def start(self, bee):
         self.cell.state = "nursing"
@@ -116,7 +119,10 @@ class Nurse(Task):
             hive.request_cleaner(self.cell)
             self.cell.progress = 0
             new_bee = Bee(self.cell.rect.center[0], self.cell.rect.center[1], "unassigned")
-            new_bee.add_task(TravelTo(random_in_rect(job_rect)))
+            new_bee.add_tasks([
+                TravelTo(random_in_rect(job_rect)),
+                GetJob(),
+            ])
             hive.add_bee(new_bee)
     def is_done(self):
         return self.elapsed_time == self.total_time
@@ -125,7 +131,7 @@ class Clean(Task):
     def __init__(self, cell):
         super().__init__()
         self.cell = cell
-        self.total_time = FPS * 2
+        self.total_time = FPS * 4
         self.elapsed_time = 0
     def start(self, bee):
         self.cell.state = "cleaning"
@@ -141,7 +147,7 @@ class MakeFood(Task):
     def __init__(self, cell):
         super().__init__()
         self.cell = cell
-        self.total_time = FPS * 2
+        self.total_time = FPS * 5
         self.elapsed_time = 0
     def start(self, bee):
         self.cell.state = "making food"
@@ -167,12 +173,24 @@ class Die(Task):
         self.elapsed_time = 0
     def start(self, bee):
         self.bee = bee
+        bee.job = "dying"
     def update(self):
         self.elapsed_time += 1
         if self.elapsed_time == self.total_time:
             hive.remove_bee(self.bee)
     def is_done(self):
         return self.elapsed_time == self.total_time
+
+
+class GetJob(Task):
+    def __init__(self):
+        super().__init__()
+    def start(self, bee):
+        hive.bees_needing_jobs.append(bee)
+    def update(self):
+        pass
+    def is_done(self):
+        return True
 
 
 def center_text(surface, rect):
@@ -228,8 +246,17 @@ class Hive(object):
         self.bees_needing_jobs = []
         self.debug = False
         self.next_id = 1
+        self.cell_dict = defaultdict(lambda: defaultdict(None))
         for bee in bees:
             self.assign_id(bee)
+        for cell in cells:
+            self.cell_dict[cell.row][cell.col] = cell
+
+    def get_cell(self, r, c):
+        if r in self.cell_dict:
+            if c in self.cell_dict[r]:
+                return self.cell_dict[r][c]
+        return None
 
     def assign_id(self, bee):
         bee.id = self.next_id
@@ -237,7 +264,6 @@ class Hive(object):
 
     def add_bee(self, bee):
         self.assign_id(bee)
-        self.bees_needing_jobs.append(bee)
         self.bees.append(bee)
         self.bee_bread -= 1
 
@@ -334,6 +360,21 @@ class Hive(object):
             return qualified_bees[0]
         return None
 
+    def enable_cells(self):
+        for cell in self.cells:
+            if cell.type == "none":
+                neighbors = [(-1, -1), (-1, 0), (0, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]
+                for (r1, c1), (r2, c2) in itertools.pairwise(neighbors):
+                    a1 = 0 if r1 == 0 else cell.row % 2
+                    a2 = 0 if r2 == 0 else cell.row % 2
+                    n1 = self.get_cell(cell.row + r1, cell.col + c1 + a1)
+                    n2 = self.get_cell(cell.row + r2, cell.col + c2 + a2)
+                    if n1 is not None and n2 is not None:
+                        if n1.type not in ["none", "unbuilt"] and n2.type not in ["none", "unbuilt"]:
+                            cell.type = "unbuilt"
+                            cell.state = "unbuilt"
+                            break
+
     def draw(self, surface):
         honey_text = font_small.render("Honey: %d/100" % self.honey, True, GRAY)
         bee_bread_text = font_small.render("Bee bread: %d/20" % self.bee_bread, True, GRAY)
@@ -363,16 +404,17 @@ class Hive(object):
         surface.blit(food_maker_bee_count_text, (SCREEN_WIDTH * 4 / 6 - food_maker_bee_count_text.get_width() / 2, food_maker_bee_text.get_height()))
         surface.blit(builder_bee_count_text, (SCREEN_WIDTH * 5 / 6 - builder_bee_count_text.get_width() / 2, builder_bee_text.get_height()))
 
-
 class Cell(pygame.sprite.Sprite):
-    def __init__(self, row, col):
+    def __init__(self, row, col, typ = "none"):
         super().__init__()
+        self.row = row
+        self.col = col
         y = SCREEN_HEIGHT / 2 + row * CELL_SIZE * 3 
         x = SCREEN_WIDTH / 2 + (col * 2 + row % 2) * CELL_SIZE * SQRT3
         self.rect = pygame.Rect(0, 0, CELL_SIZE * SQRT3 * 2, CELL_SIZE * 2)
         self.rect.center = (x, y)
-        self.type = "unbuilt"
-        self.state = "unbuilt"
+        self.type = typ
+        self.state = typ
         self.progress = 0
         self.buttons = [
             Button(self, "Nursery", NURSE_BEE_COLOR, 0, 0, self.make_nursery),
@@ -399,6 +441,11 @@ class Cell(pygame.sprite.Sprite):
         hive.request_food_maker(self)
 
     def draw(self, surface):
+        if hive.debug:
+            rc_text = font_small.render("%d, %d" % (self.row, self.col), True, GRAY)
+            surface.blit(rc_text, self.rect.center)
+        if self.type == "none":
+            return
         if self.type == "unbuilt":
             if self.state == "building":
                 border_color = YELLOW_CELL2
@@ -417,7 +464,7 @@ class Cell(pygame.sprite.Sprite):
             bg_color = YELLOW_CELL3
         else:
             border_color = BUILDER_BEE_COLOR
-            bg_color = YELLOW_CELL3
+            bg_color = YELLOW_CELL1
         if self.state == "cleaner requested" or self.state == "cleaning":
             bg_color = LIGHT_GRAY
 
@@ -500,9 +547,11 @@ class Bee(pygame.sprite.Sprite):
         if self.task is None or self.task.is_done():
             if self.meals == 3 and self.job in ["nurse", "cleaner"]:
                 self.job = "unassigned2"
-                hive.bees_needing_jobs.append(self)
-                self.add_task(TravelTo(random_in_rect(job_rect)))
-            if self.meals == 6:
+                self.add_tasks([
+                    TravelTo(random_in_rect(job_rect)),
+                    GetJob(),
+                ])
+            elif self.meals == 6:
                 self.add_tasks([
                     TravelTo(random_in_rect(die_rect)),
                     Die(),
@@ -558,6 +607,10 @@ class Bee(pygame.sprite.Sprite):
             size *= 1.2
         elif self.job == "unassigned2":
             size *= 1.2
+        elif self.job == "dying":
+            size *= 1.2
+            bee_color = LIGHT_GRAY
+
         pygame.draw.circle(surface, YELLOW_BEE1, self.center, size)
         pygame.draw.circle(surface, bee_color, self.center, size / 2)
         pygame.gfxdraw.aacircle(surface, int(self.center[0]), int(self.center[1]), int(size), BLACK)
@@ -567,7 +620,7 @@ class Bee(pygame.sprite.Sprite):
         if self.job in ["unassigned", "unassigned2"]:
             self.rect = pygame.Rect(0, 0, BEE_SIZE * 2, BEE_SIZE * 4)
             self.rect.midbottom = self.center
-            if not self.is_busy() and hive.is_first_bee_waiting_for_job(self) and job_rect.collidepoint(self.center):
+            if hive.is_first_bee_waiting_for_job(self):
                 for button in self.buttons[self.job]:
                     button.draw(surface)
 
@@ -601,13 +654,19 @@ class QueenBee(pygame.sprite.Sprite):
         pygame.gfxdraw.aacircle(surface, int(self.center[0]), int(self.center[1]), int(size), BLACK)
 
 
+cells = []
+for r in range(-2, 4):
+    for c in range(-3, 4):
+        typ = "unbuilt" if (r == 0 and c == 0) or (r == 1 and c in [-1, 0]) else "none"
+        cells.append(Cell(r, c, typ))
+
 hive = Hive(
-    cells = [Cell(0, 0), Cell(1, -1), Cell(1, 0)], 
+    cells = cells, 
     bees = [Bee(100, 100, "nurse"), Bee(200, 100, "builder"), Bee(300, 100, "cleaner"), Bee(400, 100, "food maker")]
 )
 qb = QueenBee(SCREEN_WIDTH - 200, 200)
 job_rect = pygame.Rect(50, SCREEN_HEIGHT * 2 / 3, SCREEN_HEIGHT / 3, SCREEN_HEIGHT / 3 - 50)
-die_rect = pygame.Rect(SCREEN_WIDTH * 2 / 3, SCREEN_HEIGHT * 2 / 3, SCREEN_HEIGHT / 3, SCREEN_HEIGHT / 3 - 50)
+die_rect = pygame.Rect(SCREEN_WIDTH * 3 / 4, SCREEN_HEIGHT * 2 / 3, SCREEN_HEIGHT / 3, SCREEN_HEIGHT / 3 - 50)
 idle_rect = pygame.Rect(100, 100, 400, 300)
 
 def main():
@@ -644,12 +703,15 @@ def main():
                 elif event.key == K_d:
                     hive.debug = not hive.debug
 
+        game_over = hive.honey == 0 or hive.bee_bread == 0 or len(hive.bees) == 0
+
         # Update
-        for bee in hive.bees:
-            bee.update()
-        for cell in hive.cells:
-            cell.update()
-        qb.update()
+        if not game_over:
+            for bee in hive.bees:
+                bee.update()
+            for cell in hive.cells:
+                cell.update()
+            qb.update()
 
         # Draw
         surface.fill(YELLOW_BG)
@@ -664,6 +726,10 @@ def main():
         qb.draw(surface)
         hive.draw(surface)
         
+        if game_over:
+            game_over_text = font.render("COLONY COLLAPSE", True, BLACK)
+            surface.blit(game_over_text, (SCREEN_WIDTH / 2 - game_over_text.get_width() / 2, SCREEN_HEIGHT / 2 - game_over_text.get_height() / 2))
+
         pygame.display.update()
         FramePerSec.tick(FPS)
 
