@@ -34,6 +34,7 @@ SQRT3 = math.sqrt(3)
 
 pygame.init()
 font = pygame.font.SysFont("Verdana", 60)
+font_medium = pygame.font.SysFont("Verdana", 30)
 font_small = pygame.font.SysFont("Verdana", 20)
 font_tiny = pygame.font.SysFont("Verdana", 14)
 build_text = font_small.render("Build", True, GRAY)
@@ -178,6 +179,8 @@ class Button(object):
 class Hive(object):
     def __init__(self, bees = [], cells = []):
         pass
+        self.honey = 20
+        self.bee_bread = 5
         self.bees = bees
         self.cells = cells
         self.cells_needing_builder = []
@@ -198,6 +201,7 @@ class Hive(object):
         self.assign_id(bee)
         self.bees_needing_jobs.append(bee)
         self.bees.append(bee)
+        self.bee_bread -= 1
 
     def is_first_bee_waiting_for_job(self, bee):
         return len(self.bees_needing_jobs) > 0 and bee.id == self.bees_needing_jobs[0].id
@@ -284,6 +288,35 @@ class Hive(object):
             return qualified_bees[0]
         return None
 
+    def draw(self, surface):
+        honey_text = font_small.render("Honey: %d/100" % self.honey, True, GRAY)
+        bee_bread_text = font_small.render("Bee bread: %d/20" % self.bee_bread, True, GRAY)
+        surface.blit(honey_text, (SCREEN_WIDTH - honey_text.get_width() - honey_text.get_height()/2, honey_text.get_height()/2))
+        surface.blit(bee_bread_text, (SCREEN_WIDTH - bee_bread_text.get_width() - bee_bread_text.get_height()/2, honey_text.get_height() + bee_bread_text.get_height()))
+        
+        total_bee_text = font_medium.render("Total bees", True, GRAY)
+        surface.blit(total_bee_text, ((SCREEN_WIDTH - total_bee_text.get_width()) / 2, 0))
+        bee_count_text = font.render(str(len(self.bees)), True, GRAY)
+        surface.blit(bee_count_text, ((SCREEN_WIDTH - bee_count_text.get_width()) / 2, total_bee_text.get_height()))
+
+        nurse_bee_text = font_small.render("Nurse bees", True, GRAY)
+        cleaner_bee_text = font_small.render("Cleaner bees", True, GRAY)
+        food_maker_bee_text = font_small.render("Food maker bees", True, GRAY)
+        builder_bee_text = font_small.render("Builder bees", True, GRAY)
+        surface.blit(nurse_bee_text, (SCREEN_WIDTH / 6 - nurse_bee_text.get_width() / 2, 0))
+        surface.blit(cleaner_bee_text, (SCREEN_WIDTH * 2 / 6 - cleaner_bee_text.get_width() / 2, 0))
+        surface.blit(food_maker_bee_text, (SCREEN_WIDTH * 4 / 6 - food_maker_bee_text.get_width() / 2, 0))
+        surface.blit(builder_bee_text, (SCREEN_WIDTH * 5 / 6 - builder_bee_text.get_width() / 2, 0))
+        
+        nurse_bee_count_text = font_medium.render(str(sum(1 for bee in self.bees if bee.job == "nurse")), True, NURSE_BEE_COLOR)
+        cleaner_bee_count_text = font_medium.render(str(sum(1 for bee in self.bees if bee.job == "cleaner")), True, CLEANER_BEE_COLOR)
+        food_maker_bee_count_text = font_medium.render(str(sum(1 for bee in self.bees if bee.job == "food maker")), True, FOOD_MAKER_BEE_COLOR)
+        builder_bee_count_text = font_medium.render(str(sum(1 for bee in self.bees if bee.job == "builder")), True, BUILDER_BEE_COLOR)
+        surface.blit(nurse_bee_count_text, (SCREEN_WIDTH / 6 - nurse_bee_count_text.get_width() / 2, nurse_bee_text.get_height()))
+        surface.blit(cleaner_bee_count_text, (SCREEN_WIDTH * 2 / 6 - cleaner_bee_count_text.get_width() / 2, cleaner_bee_text.get_height()))
+        surface.blit(food_maker_bee_count_text, (SCREEN_WIDTH * 4 / 6 - food_maker_bee_count_text.get_width() / 2, food_maker_bee_text.get_height()))
+        surface.blit(builder_bee_count_text, (SCREEN_WIDTH * 5 / 6 - builder_bee_count_text.get_width() / 2, builder_bee_text.get_height()))
+
 
 class Cell(pygame.sprite.Sprite):
     def __init__(self, row, col):
@@ -326,6 +359,12 @@ class Cell(pygame.sprite.Sprite):
                 bg_color = YELLOW_CELL2
         elif self.type == "nursery":
             border_color = NURSE_BEE_COLOR
+            bg_color = YELLOW_CELL3
+        elif self.type == "bee bread":
+            border_color = FOOD_MAKER_BEE_COLOR
+            bg_color = YELLOW_CELL3
+        elif self.type == "honey":
+            border_color = BUILDER_BEE_COLOR
             bg_color = YELLOW_CELL3
         else:
             border_color = BUILDER_BEE_COLOR
@@ -372,6 +411,7 @@ class Bee(pygame.sprite.Sprite):
             Button(self, "(N)urse", NURSE_BEE_COLOR, 0, 20, self.make_nurse),
             Button(self, "(C)leaner", CLEANER_BEE_COLOR, 0, 50, self.make_cleaner),
         ]
+        self.time_since_last_meal = 0
 
     def make_nurse(self):
         self.job = "nurse"
@@ -380,6 +420,11 @@ class Bee(pygame.sprite.Sprite):
         self.job = "cleaner"
 
     def update(self):
+        self.time_since_last_meal += 1
+        if self.time_since_last_meal > 30 * FPS:
+            hive.honey -= 1
+            self.time_since_last_meal = 0
+
         if self.task is None or self.task.is_done():
             if len(self.tasks) == 0:
                 if self.job == "unassigned":
@@ -524,6 +569,7 @@ def main():
         for b in hive.bees:
             b.draw(surface)
         qb.draw(surface)
+        hive.draw(surface)
         
         pygame.display.update()
         FramePerSec.tick(FPS)
