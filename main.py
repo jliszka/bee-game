@@ -40,8 +40,7 @@ font = pygame.font.SysFont("Verdana", 60)
 font_medium = pygame.font.SysFont("Verdana", 30)
 font_small = pygame.font.SysFont("Verdana", 20)
 font_tiny = pygame.font.SysFont("Verdana", 14)
-build_text = font_small.render("Build", True, GRAY)
-requested_text = font_small.render("Requested", True, GRAY)
+build_text = font.render("+", True, LIGHT_GRAY)
 
 def hexagon(center, size):
     return [
@@ -159,9 +158,9 @@ class MakeFood(Task):
         self.cell.progress = self.elapsed_time / self.total_time
         if self.elapsed_time == self.total_time:
             if self.cell.type == "honey":
-                hive.honey += 4
+                hive.honey = min(100, hive.honey + 4)
             elif self.cell.type == "bee bread":
-                hive.bee_bread += 1
+                hive.bee_bread = min(20, hive.bee_bread + 1)
             self.cell.state = "cleaner requested"
             hive.request_cleaner(self.cell)
             self.cell.progress = 0
@@ -211,11 +210,11 @@ def center_text2(surface, rect):
 
 
 class Button(object):
-    def __init__(self, parent, text, color, x, y, fn):
+    def __init__(self, parent, text, color, x, y, fn, font = font_tiny):
         self.parent = parent
         self.fn = fn
         self.pos = (x, y)
-        self.rendered_text = font_tiny.render(text, True, GRAY)
+        self.rendered_text = font.render(text, True, GRAY)
         w = self.rendered_text.get_width() + 16
         h = self.rendered_text.get_height() + 10
         self.button_surface = pygame.Surface((w, h))
@@ -249,6 +248,7 @@ class Hive(object):
         self.debug = False
         self.next_id = 1
         self.cell_dict = defaultdict(lambda: defaultdict(None))
+        self.rect = pygame.Rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT)
         for bee in bees:
             self.assign_id(bee)
         for cell in cells:
@@ -452,9 +452,12 @@ class Cell(pygame.sprite.Sprite):
             if self.state == "building":
                 border_color = YELLOW_CELL2
                 bg_color = YELLOW_CELL1
-            else:
+            elif self.state == "build requested":
                 border_color = YELLOW_CELL1
                 bg_color = YELLOW_CELL2
+            else:
+                border_color = YELLOW_BG
+                bg_color = YELLOW_BG
         elif self.type == "nursery":
             border_color = NURSE_BEE_COLOR
             bg_color = YELLOW_CELL3
@@ -478,9 +481,6 @@ class Cell(pygame.sprite.Sprite):
         if self.type == "unbuilt":
             if self.state == "unbuilt" and self.rect.collidepoint(pygame.mouse.get_pos()):
                 surface.blit(build_text, center_text(build_text, self.rect))
-            elif self.state == "build requested":
-                surface.blit(build_text, center_text1(build_text, self.rect))
-                surface.blit(requested_text, center_text2(requested_text, self.rect))
         elif self.state == "ready" and self.rect.collidepoint(pygame.mouse.get_pos()):
             for button in self.buttons:
                 button.draw(surface)
@@ -656,20 +656,26 @@ class QueenBee(pygame.sprite.Sprite):
         pygame.gfxdraw.aacircle(surface, int(self.center[0]), int(self.center[1]), int(size), BLACK)
 
 
-cells = []
-for r in range(-2, 4):
-    for c in range(-3, 4):
-        typ = "unbuilt" if (r == 0 and c == 0) or (r == 1 and c in [-1, 0]) else "none"
-        cells.append(Cell(r, c, typ))
+hive = None
+def init():
+    global hive
+    cells = []
+    for r in range(-2, 4):
+        for c in range(-3, 4):
+            typ = "unbuilt" if (r == 0 and c == 0) or (r == 1 and c in [-1, 0]) else "none"
+            cells.append(Cell(r, c, typ))
 
-hive = Hive(
-    cells = cells, 
-    bees = [Bee(100, 100, "nurse"), Bee(200, 100, "builder"), Bee(300, 100, "cleaner"), Bee(400, 100, "food maker")]
-)
+    hive = Hive(
+        cells = cells,
+        bees = [Bee(100, 100, "nurse"), Bee(200, 100, "builder"), Bee(300, 100, "cleaner"), Bee(400, 100, "food maker")]
+    )
+init()
+
 qb = QueenBee(SCREEN_WIDTH - 200, 200)
 job_rect = pygame.Rect(50, SCREEN_HEIGHT * 2 / 3, SCREEN_HEIGHT / 3, SCREEN_HEIGHT / 3 - 50)
 die_rect = pygame.Rect(SCREEN_WIDTH * 3 / 4, SCREEN_HEIGHT * 2 / 3, SCREEN_HEIGHT / 3, SCREEN_HEIGHT / 3 - 50)
 idle_rect = pygame.Rect(100, 100, 400, 300)
+start_over_button = Button(hive, "Start Over", NURSE_BEE_COLOR, 0, SCREEN_HEIGHT / 2 + 40, init, font)
 
 def main():
     FramePerSec = pygame.time.Clock()
@@ -678,12 +684,17 @@ def main():
     surface = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 
     while True:
+        game_over = hive.honey == 0 or hive.bee_bread == 0 or len(hive.bees) == 0
+
         # Events
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
                 sys.exit()
             elif event.type == MOUSEBUTTONUP:
+                if game_over:
+                    if start_over_button.get_rect().collidepoint(pygame.mouse.get_pos()):
+                        start_over_button.handle_click()
                 for cell in hive.cells:
                     if cell.rect.collidepoint(pygame.mouse.get_pos()):
                         cell.handle_click()
@@ -704,8 +715,6 @@ def main():
                     hive.assign_job("builder")
                 elif event.key == K_d:
                     hive.debug = not hive.debug
-
-        game_over = hive.honey == 0 or hive.bee_bread == 0 or len(hive.bees) == 0
 
         # Update
         if not game_over:
@@ -731,6 +740,7 @@ def main():
         if game_over:
             game_over_text = font.render("COLONY COLLAPSE", True, BLACK)
             surface.blit(game_over_text, (SCREEN_WIDTH / 2 - game_over_text.get_width() / 2, SCREEN_HEIGHT / 2 - game_over_text.get_height() / 2))
+            start_over_button.draw(surface)
 
         pygame.display.update()
         FramePerSec.tick(FPS)
