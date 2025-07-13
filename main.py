@@ -661,7 +661,7 @@ def init():
     global hive
     cells = []
     for r in range(-2, 4):
-        for c in range(-3, 4):
+        for c in range(-3 if r < 2 else -2, 4):
             typ = "unbuilt" if (r == 0 and c == 0) or (r == 1 and c in [-1, 0]) else "none"
             cells.append(Cell(r, c, typ))
 
