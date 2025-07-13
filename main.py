@@ -246,6 +246,7 @@ class Hive(object):
         self.cells_needing_cleaner = []
         self.bees_needing_jobs = []
         self.debug = False
+        self.paused = False
         self.next_id = 1
         self.cell_dict = defaultdict(lambda: defaultdict(None))
         self.rect = pygame.Rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT)
@@ -682,11 +683,15 @@ def init():
     )
 init()
 
+def pause():
+    hive.paused = not hive.paused
+
 qb = QueenBee(SCREEN_WIDTH - 200, 200)
 job_rect = pygame.Rect(50, SCREEN_HEIGHT * 2 / 3, SCREEN_HEIGHT / 3, SCREEN_HEIGHT / 3 - 50)
 die_rect = pygame.Rect(SCREEN_WIDTH * 3 / 4, SCREEN_HEIGHT * 2 / 3, SCREEN_HEIGHT / 3, SCREEN_HEIGHT / 3 - 50)
 idle_rect = pygame.Rect(100, 100, 400, 300)
 start_over_button = Button(hive, "Start Over", NURSE_BEE_COLOR, 0, SCREEN_HEIGHT / 2 + 40, init, font)
+pause_button = Button(hive, "Pause", NURSE_BEE_COLOR, SCREEN_WIDTH / 2 - 50, 90, pause, font_small)
 
 def main():
     FramePerSec = pygame.time.Clock()
@@ -706,6 +711,8 @@ def main():
                 if game_over:
                     if start_over_button.get_rect().collidepoint(pygame.mouse.get_pos()):
                         start_over_button.handle_click()
+                if pause_button.get_rect().collidepoint(pygame.mouse.get_pos()):
+                    pause_button.handle_click()
                 for cell in hive.cells:
                     if cell.rect.collidepoint(pygame.mouse.get_pos()):
                         cell.handle_click()
@@ -728,7 +735,7 @@ def main():
                     hive.debug = not hive.debug
 
         # Update
-        if not game_over:
+        if not game_over and not hive.paused:
             for bee in hive.bees:
                 bee.update()
             for cell in hive.cells:
@@ -747,6 +754,7 @@ def main():
             b.draw(surface)
         qb.draw(surface)
         hive.draw(surface)
+        pause_button.draw(surface)
         
         if game_over:
             game_over_text = font.render("COLONY COLLAPSE", True, BLACK)
