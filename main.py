@@ -216,7 +216,7 @@ class Button(object):
         self.pos = (x, y)
         self.rendered_text = font.render(text, True, GRAY)
         w = self.rendered_text.get_width() + 16
-        h = self.rendered_text.get_height() + 10
+        h = self.rendered_text.get_height() + 8
         self.button_surface = pygame.Surface((w, h))
         pygame.draw.rect(self.button_surface, color, self.button_surface.get_rect())
         self.button_surface.blit(self.rendered_text, center_text(self.rendered_text, self.button_surface.get_rect()))
@@ -495,6 +495,8 @@ class Cell(pygame.sprite.Sprite):
             size = CELL_SIZE / 8 * (1 + self.progress)
             hex = hexagon(move_point(self.rect.center, 0, CELL_SIZE), size)
             pygame.draw.polygon(surface, BUILDER_BEE_COLOR, hex)
+        if hive.debug:
+            pygame.draw.rect(surface, BLACK, self.rect, 1)
 
     def handle_click(self):
         if self.state == "unbuilt":
@@ -660,8 +662,17 @@ hive = None
 def init():
     global hive
     cells = []
-    for r in range(-2, 4):
-        for c in range(-3 if r < 2 else -2, 4):
+    row_indexes = {
+        -3: range (-2, 3),
+        -2: range(-3, 5),
+        -1: range(-4, 5),
+        0: range(-3, 6),
+        1: range(-3, 5),
+        2: range(-2, 4),
+        3: range(-2, 3),
+    }
+    for r, cell_range in row_indexes.items():
+        for c in cell_range:
             typ = "unbuilt" if (r == 0 and c == 0) or (r == 1 and c in [-1, 0]) else "none"
             cells.append(Cell(r, c, typ))
 
