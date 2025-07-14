@@ -39,7 +39,7 @@ SQRT3 = math.sqrt(3)
 font = pygame.font.SysFont("Verdana", 60)
 font_medium = pygame.font.SysFont("Verdana", 30)
 font_small = pygame.font.SysFont("Verdana", 20)
-font_tiny = pygame.font.SysFont("Verdana", 14)
+font_tiny = pygame.font.SysFont("Verdana", SCREEN_WIDTH//114)
 build_text = font.render("+", True, LIGHT_GRAY)
 
 def hexagon(center, size):
@@ -215,8 +215,8 @@ class Button(object):
         self.fn = fn
         self.pos = (x, y)
         self.rendered_text = font.render(text, True, GRAY)
-        w = self.rendered_text.get_width() + 16
-        h = self.rendered_text.get_height() + 8
+        w = self.rendered_text.get_width() + SCREEN_WIDTH // 100
+        h = self.rendered_text.get_height() + SCREEN_WIDTH // 200
         self.button_surface = pygame.Surface((w, h))
         pygame.draw.rect(self.button_surface, color, self.button_surface.get_rect())
         self.button_surface.blit(self.rendered_text, center_text(self.rendered_text, self.button_surface.get_rect()))
@@ -421,8 +421,8 @@ class Cell(pygame.sprite.Sprite):
         self.progress = 0
         self.buttons = [
             Button(self, "Nursery", NURSE_BEE_COLOR, 0, 0, self.make_nursery),
-            Button(self, "Bee bread", FOOD_MAKER_BEE_COLOR, 0, 30, self.request_bee_bread),
-            Button(self, "Honey", BUILDER_BEE_COLOR, 0, 60, self.request_honey),
+            Button(self, "Bee bread", FOOD_MAKER_BEE_COLOR, 0, SCREEN_HEIGHT // 38, self.request_bee_bread),
+            Button(self, "Honey", BUILDER_BEE_COLOR, 0, SCREEN_HEIGHT // 19, self.request_honey),
         ]
  
     def update(self):
