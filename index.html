@@ -28,8 +28,8 @@
     const BUILDER_BEE_COLOR = 'rgb(255,200,100)';
     const CLEANER_BEE_COLOR = 'rgb(120,180,255)';
     const FOOD_MAKER_BEE_COLOR = 'rgb(100,200,150)';
-    const BEE_SPEED = 4;
-    const QB_SPEED = 4;
+    const BEE_SPEED = 5;
+    const QB_SPEED = 6;
     const SQRT3 = Math.sqrt(3);
 
     // Canvas setup
@@ -51,6 +51,7 @@
     resize();
 
     // Utility
+    function mod(a, b) { return Math.abs(a % b); }
     function distance(a, b) { return Math.hypot(b.x - a.x, b.y - a.y); }
     function movePoint(p, dx, dy) { return { x: p.x + dx, y: p.y + dy }; }
     function randomInRect(r) { return { x: r.x + Math.random()*r.width, y: r.y + Math.random()*r.height }; }
@@ -85,7 +86,7 @@
         this.dy=(this.dest.y-bee.center.y)/d*BEE_SPEED;
       }
       update(){ this.bee.center=movePoint(this.bee.center,this.dx,this.dy); }
-      isDone(){ return distance(this.bee.center,this.dest)<2; }
+      isDone(){ return distance(this.bee.center,this.dest)<4; }
     }
     class Build extends Task {
       constructor(cell){ super(); this.cell=cell; }
@@ -182,13 +183,19 @@
 
     // Hive
     class Hive {
-      constructor(cells=[],bees=[]) { 
+      constructor(cells=[],bees=[]) {
+        this.time = 0;
         this.honey=20; this.beeBread=5; this.cells=cells; this.bees=bees;
         this.cellsNeedingBuilder=[]; this.cellsNeedingNurse=[]; this.cellsNeedingCleaner=[]; this.cellsNeedingFoodMaker=[];
         this.beesNeedingJobs=[]; this.debug=false; this.paused=false; this.nextId=1;
         this.center = {x:canvas.width/2, y: canvas.height/2};
         this.cellMap = {};
         bees.forEach(b=>this.assignId(b)); cells.forEach(c=>{ this.cellMap[`${c.row},${c.col}`]=c; });
+      }
+      update() {
+        this.cells.forEach(c=>c.update()); 
+        this.bees.forEach(b=>b.update()); 
+        this.time += 1;
       }
       assignId(b){ b.id=this.nextId++; }
       addBee(b){ this.assignId(b); this.bees.push(b); this.beeBread--; }
@@ -259,10 +266,16 @@
       }
       enableCells() {
         this.cells.forEach(c=>{ if(c.type==='none'){ const neigh=[[-1,-1],[-1,0],[0,1],[1,0],[1,-1],[0,-1]];
-            for(let i=0;i<neigh.length;i++){ const [r1,c1]=neigh[i], [r2,c2]=neigh[(i+1)%neigh.length];
-              const n1=this.cellMap[`${c.row+r1},${c.col+c1+(r1?c.row%2:0)}`];
-              const n2=this.cellMap[`${c.row+r2},${c.col+c2+(r2?c.row%2:0)}`];
-              if(n1&&n2&&n1.type!=='none'&&n1.type!=='unbuilt'&&n2.type!=='none'&&n2.type!=='unbuilt'){ c.type='unbuilt'; c.state='unbuilt'; break; }
+            for(let i=0;i<neigh.length;i++) {
+              const [r1,c1] = neigh[i];
+              const [r2,c2] = neigh[mod(i+1, neigh.length)];
+              const n1 = this.cellMap[`${c.row + r1},${c.col + c1 + (r1 ? mod(c.row, 2) : 0)}`];
+              const n2 = this.cellMap[`${c.row + r2},${c.col + c2 + (r2 ? mod(c.row, 2) : 0)}`];
+              if (n1 && n2 && n1.type !== 'none' && n1.type !== 'unbuilt' && n2.type !== 'none' && n2.type!=='unbuilt'){  
+                c.type = 'unbuilt';
+                c.state = 'unbuilt';
+                break;
+              }
             }
         }});
       }
@@ -292,6 +305,17 @@
         ctx.fillStyle=GRAY; ctx.font='30px Verdana';
         centerText('Total bees', { x: canvas.width * 3 / 6, y: 20 })
         centerText(this.bees.length, { x: canvas.width * 3 / 6, y: 60 })
+
+        ctx.font='24px Verdana';
+        const m = Math.floor(this.time / 60 / 60);
+        const s = Math.floor(this.time / 60);
+        const pad = s < 10 ? '0' : '';
+        centerText(`${m}:${pad}${s}`, { x: canvas.width * 1 / 20, y: 30 })
+
+        ctx.fillStyle=BUILDER_BEE_COLOR; 
+        ctx.beginPath(); 
+        ctx.arc(0, canvas.height, canvas.height / 2, 0, Math.PI / 2, true);
+        ctx.fill();
       }
     }
 
@@ -300,7 +324,7 @@
       constructor(row,col,type) {
         this.row=row; this.col=col; this.type=type; this.state=type; this.progress=0;
         const y=canvas.height/2+row*CELL_SIZE*3;
-        const x=canvas.width/2+(col*2+row%2)*CELL_SIZE*SQRT3;
+        const x=canvas.width/2+(col*2+mod(row, 2))*CELL_SIZE*SQRT3;
         this.center = {x,y}; 
         this.rect = {x:x-SQRT3*CELL_SIZE,y:y-CELL_SIZE,width:2*SQRT3*CELL_SIZE,height:2*CELL_SIZE};
         this.buttons = [
@@ -323,6 +347,10 @@
         this.type='honey'; hive.requestFoodMaker(this);
       }
       draw() { 
+        if (hive.debug) {
+          ctx.fillStyle = BLACK; ctx.font='20px Verdana';
+          centerText(`${this.row},${this.col}`, this.center);
+        }
         if(this.type==='none') return;
         let border=YELLOW_BG, bg=YELLOW_BG;
         if (this.type === 'unbuilt') {
@@ -383,8 +411,8 @@
             new Button(this,'(C)leaner',CLEANER_BEE_COLOR,0,-45,()=>this.makeCleaner()) 
           ],
           'unassigned2': [
-            new Button(this,'(F)ood Maker',FOOD_MAKER_BEE_COLOR,0,-70,()=>this.makeFoodMaker()),
-            new Button(this,'(B)uilder',BUILDER_BEE_COLOR,0,-45,()=>this.makeBuilder()) 
+            new Button(this,'(F)ood Maker',FOOD_MAKER_BEE_COLOR,0,-75,()=>this.makeFoodMaker()),
+            new Button(this,'(B)uilder',YELLOW_BEE1,0,-50,()=>this.makeBuilder()) 
           ]
         };
       }
@@ -506,23 +534,22 @@
       });
       const bees=[ new Bee(100,100,'nurse'), new Bee(200,100,'builder'), new Bee(300,100,'cleaner'), new Bee(400,100,'food maker') ];
       hive=new Hive(cells,bees); queen=new QueenBee(canvas.width-200,200);
-      startBtn=new Button(hive,'Start Over',NURSE_BEE_COLOR,0,40,init, 24);
+      startBtn=new Button(hive,'Start Over',NURSE_BEE_COLOR,0,50,init, 24);
       pauseBtn=new Button(hive,'Pause', NURSE_BEE_COLOR, canvas.width/2-50, -canvas.height/2+20, () => hive.paused = !hive.paused, 20);
     }
     init();
     function update() {
-      hive.cells.forEach(c=>c.update()); 
-      hive.bees.forEach(b=>b.update()); 
+      hive.update();
       queen.update(); 
       gameOver = hive.honey <= 0 || hive.beeBread <= 0 || !hive.bees.length;
     }
     function draw(){
       ctx.fillStyle=YELLOW_BG; ctx.fillRect(0,0,canvas.width,canvas.height);
       hive.enableCells(); // ensure new cells appear
+      hive.draw();
       hive.cells.forEach(c=>c.draw());
       hive.bees.forEach(b=>b.draw());
       queen.draw();
-      hive.draw();
       pauseBtn.draw();
       if (gameOver) {
         ctx.fillStyle=BLACK; ctx.font='60px Verdana';
