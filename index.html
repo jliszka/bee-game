@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bee Game</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; background: rgb(255,255,200); }
+    button { position: absolute; z-index: 10; }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <script>
+    // Constants
+    const FPS = 60;
+    const BLACK = 'rgb(0,0,0)';
+    const GRAY = 'rgb(127,127,127)';
+    const LIGHT_GRAY = 'rgb(230,230,230)';
+    const WHITE = 'rgb(255,255,255)';
+    const YELLOW_BG = 'rgb(255,255,200)';
+    const YELLOW_CELL1 = 'rgb(230,230,150)';
+    const YELLOW_CELL2 = 'rgb(240,240,180)';
+    const YELLOW_CELL3 = 'rgb(240,240,100)';
+    const YELLOW_BEE1 = 'rgb(255,255,100)';
+    const NURSE_BEE_COLOR = 'rgb(210,200,255)';
+    const BUILDER_BEE_COLOR = 'rgb(255,200,100)';
+    const CLEANER_BEE_COLOR = 'rgb(120,180,255)';
+    const FOOD_MAKER_BEE_COLOR = 'rgb(100,200,150)';
+    const BEE_SPEED = 4;
+    const QB_SPEED = 4;
+    const SQRT3 = Math.sqrt(3);
+
+    // Canvas setup
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let CELL_SIZE, BEE_SIZE;
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      CELL_SIZE = canvas.width / 40;
+      BEE_SIZE = canvas.height / 30;
+      // define interaction rects
+      jobRect = { x: 50, y: canvas.height*2/3, width: canvas.height/3, height: canvas.height/3 - 50 };
+      dieRect = { x: canvas.width*3/4, y: canvas.height*2/3, width: canvas.height/3, height: canvas.height/3 - 50 };
+      idleRect = { x: 100, y: 100, width: 400, height: 300 };
+    }
+    window.addEventListener('resize', resize);
+    let jobRect, dieRect, idleRect;
+    resize();
+
+    // Utility
+    function distance(a, b) { return Math.hypot(b.x - a.x, b.y - a.y); }
+    function movePoint(p, dx, dy) { return { x: p.x + dx, y: p.y + dy }; }
+    function randomInRect(r) { return { x: r.x + Math.random()*r.width, y: r.y + Math.random()*r.height }; }
+    function hexagon(center, size) {
+      return [
+        {x: center.x, y: center.y + 2*size},
+        {x: center.x - SQRT3*size, y: center.y + size},
+        {x: center.x - SQRT3*size, y: center.y - size},
+        {x: center.x, y: center.y - 2*size},
+        {x: center.x + SQRT3*size, y: center.y - size},
+        {x: center.x + SQRT3*size, y: center.y + size}
+      ];
+    }
+
+    function centerText(text, center) {
+      const metrics = ctx.measureText(text);
+      textHeight = metrics.actualBoundingBoxAscent;
+      textWidth = metrics.width;
+      ctx.fillText(text, center.x - textWidth / 2, center.y + textHeight / 2);
+    }
+
+    // Task base
+    class Task {
+      start(bee){}
+      update(){}
+      isDone(){ return true; }
+    }
+    class TravelTo extends Task {
+      constructor(dest){ super(); this.dest = dest; }
+      start(bee){ this.bee = bee; const d = distance(bee.center,this.dest);
+        this.dx=(this.dest.x-bee.center.x)/d*BEE_SPEED;
+        this.dy=(this.dest.y-bee.center.y)/d*BEE_SPEED;
+      }
+      update(){ this.bee.center=movePoint(this.bee.center,this.dx,this.dy); }
+      isDone(){ return distance(this.bee.center,this.dest)<2; }
+    }
+    class Build extends Task {
+      constructor(cell){ super(); this.cell=cell; }
+      start(bee){ this.cell.state='building'; this.time=FPS*3; }
+      update(){ this.time--; if(this.time===0){ this.cell.state='ready'; this.cell.type='built'; hive.enableCells(); }}
+      isDone(){ return this.time===0; }
+    }
+    class Nurse extends Task {
+      constructor(cell){ super(); this.cell=cell; this.total=FPS*5; this.elapsed=0; }
+      start(bee){ this.cell.state='nursing'; this.cell.progress=0; }
+      update(){ 
+        this.elapsed++; this.cell.progress=this.elapsed/this.total;
+        if(this.elapsed===this.total){ 
+          this.cell.state='cleaner requested'; 
+          hive.requestCleaner(this.cell); 
+          this.cell.progress=0;
+          const nb = new Bee(this.cell.center.x,this.cell.center.y,'unassigned');
+          nb.addTasks([ new TravelTo(randomInRect(jobRect)), new GetJob() ]);
+          hive.addBee(nb);
+        }
+      }
+      isDone(){ return this.elapsed===this.total; }
+    }
+    class Clean extends Task {
+      constructor(cell){ super(); this.cell=cell; this.total=FPS*4; this.elapsed=0; }
+      start(bee){ this.cell.state='cleaning'; this.cell.progress=0; }
+      update(){ this.elapsed++; if(this.elapsed===this.total){ this.cell.state=this.cell.type; }}
+      isDone(){ return this.elapsed===this.total; }
+    }
+    class MakeFood extends Task {
+      constructor(cell){ super(); this.cell=cell; this.total=FPS*5; this.elapsed=0; }
+      start(bee){ this.cell.state='making food'; this.cell.progress=0; }
+      update() { 
+        this.elapsed++;
+        this.cell.progress = this.elapsed/this.total;
+        if (this.elapsed === this.total) {
+          if (this.cell.type==='honey') hive.honey = Math.min(100,hive.honey+4);
+          else hive.beeBread =  Math.min(20, hive.beeBread+1);
+          this.cell.state='cleaner requested';
+          hive.requestCleaner(this.cell);
+          this.cell.progress=0;
+        }
+      }
+      isDone(){ return this.elapsed===this.total; }
+    }
+    class Die extends Task {
+      constructor(){ super(); this.total=FPS*2; this.elapsed=0; }
+      start(bee){ this.bee=bee; bee.job='dying'; }
+      update(){ this.elapsed++; if(this.elapsed===this.total) hive.removeBee(this.bee); }
+      isDone(){ return this.elapsed===this.total; }
+    }
+    class GetJob extends Task {
+      start(bee){ hive.beesNeedingJobs.push(bee); }
+      update(){}
+      isDone(){ return true; }
+    }
+
+    // Button helper
+    class Button {
+      constructor(parent,text,color,x,y,fn, size=16) {
+        this.parent=parent; this.text=text; this.color=color; this.xOff=x; this.yOff=y; this.fn=fn;
+        this.font = size+'px Verdana';
+        ctx.font= this.font;
+        const metrics = ctx.measureText(text);
+        this.xpad = size;
+        this.ypad = size / 2;
+        this.w = metrics.width + this.xpad;
+        this.h = metrics.actualBoundingBoxAscent + this.ypad;
+      }
+      draw() {
+        const pos=this.getPos(); 
+        ctx.fillStyle=this.color; 
+        ctx.fillRect(pos.x,pos.y,this.w,this.h);
+        ctx.fillStyle=GRAY; ctx.font=this.font; centerText(this.text, this.getCenter());
+      }
+      getPos() { 
+        return { 
+          x:this.parent.center.x + this.xOff - this.w/2,
+          y:this.parent.center.y + this.yOff - this.h/2, 
+        };
+      }
+      getCenter() {
+        return {
+          x:this.parent.center.x + this.xOff,
+          y:this.parent.center.y + this.yOff, 
+        }
+      }
+      contains(px,py) {
+        const p=this.getPos(); 
+        return px>=p.x&&px<=p.x+this.w&&py>=p.y&&py<=p.y+this.h; 
+      }
+      handleClick(){ this.fn(); }
+    }
+
+    // Hive
+    class Hive {
+      constructor(cells=[],bees=[]) { 
+        this.honey=20; this.beeBread=5; this.cells=cells; this.bees=bees;
+        this.cellsNeedingBuilder=[]; this.cellsNeedingNurse=[]; this.cellsNeedingCleaner=[]; this.cellsNeedingFoodMaker=[];
+        this.beesNeedingJobs=[]; this.debug=false; this.paused=false; this.nextId=1;
+        this.center = {x:canvas.width/2, y: canvas.height/2};
+        this.cellMap = {};
+        bees.forEach(b=>this.assignId(b)); cells.forEach(c=>{ this.cellMap[`${c.row},${c.col}`]=c; });
+      }
+      assignId(b){ b.id=this.nextId++; }
+      addBee(b){ this.assignId(b); this.bees.push(b); this.beeBread--; }
+      removeBee(b){ this.bees=this.bees.filter(x=>x.id!==b.id); }
+      isFirstBeeWaiting(b){ return this.beesNeedingJobs[0]?.id===b.id; }
+      assignJob(job) {
+        const b = this.beesNeedingJobs[0]; 
+        if (b && ((b.job==='unassigned'&&['nurse','cleaner'].includes(job))||(b.job==='unassigned2'&&['food maker','builder'].includes(job)))){ 
+          b.job=job; this.beesNeedingJobs.shift();
+        }
+      }
+      requestJob (b) {
+        if(b.job==='builder'&&this.cellsNeedingBuilder.length){ this.assignBuilder(this.cellsNeedingBuilder.shift(),b); }
+        if(b.job==='nurse'&&this.cellsNeedingNurse.length){ this.assignNurse(this.cellsNeedingNurse.shift(),b); }
+        if(b.job==='food maker'&&this.cellsNeedingFoodMaker.length){ this.assignFoodMaker(this.cellsNeedingFoodMaker.shift(),b); }
+        if(b.job==='cleaner'&&this.cellsNeedingCleaner.length){ this.assignCleaner(this.cellsNeedingCleaner.shift(),b); }
+      }
+      requestBuilder(c) {
+        c.state='build requested'; 
+        const b = this.getBee('builder');
+        if (b) {
+          this.assignBuilder(c,b);
+        } else {
+          this.cellsNeedingBuilder.push(c);
+        }
+      }
+      assignBuilder(c,b) {
+        b.addTasks([ new TravelTo(c.center), new Build(c) ]);
+      }
+      requestNurse(c) {
+        c.state='nurse requested';
+        const b=this.getBee('nurse');
+        if (b) {
+          this.assignNurse(c,b); 
+        } else {
+          this.cellsNeedingNurse.push(c);
+        }
+      }
+      assignNurse(c,b) {
+        b.addTasks([ new TravelTo(c.center), new Nurse(c) ]);
+      }
+      requestFoodMaker(c) {
+        c.state = 'food maker requested'; 
+        const b = this.getBee('food maker');
+        if (b) { 
+          this.assignFoodMaker(c,b); 
+        } else {
+          this.cellsNeedingFoodMaker.push(c);
+        }
+      }
+      assignFoodMaker(c,b) {
+        b.addTasks([ new TravelTo(c.center), new MakeFood(c) ]);
+      }
+      requestCleaner(c) {
+        c.state='cleaner requested'; 
+        const b=this.getBee('cleaner'); 
+        if (b) {
+          this.assignCleaner(c,b); 
+        } else {
+          this.cellsNeedingCleaner.push(c); 
+        }
+      }
+      assignCleaner(c,b) {
+        b.addTasks([ new TravelTo(c.center), new Clean(c) ]);
+      }
+      getBee(job) { 
+        return this.bees.find(b => b.job === job && !b.isBusy()); 
+      }
+      enableCells() {
+        this.cells.forEach(c=>{ if(c.type==='none'){ const neigh=[[-1,-1],[-1,0],[0,1],[1,0],[1,-1],[0,-1]];
+            for(let i=0;i<neigh.length;i++){ const [r1,c1]=neigh[i], [r2,c2]=neigh[(i+1)%neigh.length];
+              const n1=this.cellMap[`${c.row+r1},${c.col+c1+(r1?c.row%2:0)}`];
+              const n2=this.cellMap[`${c.row+r2},${c.col+c2+(r2?c.row%2:0)}`];
+              if(n1&&n2&&n1.type!=='none'&&n1.type!=='unbuilt'&&n2.type!=='none'&&n2.type!=='unbuilt'){ c.type='unbuilt'; c.state='unbuilt'; break; }
+            }
+        }});
+      }
+      draw() {
+        // hive stats
+        ctx.fillStyle=GRAY; ctx.font='20px Verdana';
+        ctx.fillText(`Honey: ${this.honey}/100`,canvas.width-200,90);
+        ctx.fillText(`Bee bread: ${this.beeBread}/20`,canvas.width-200,120);
+        // bee counts
+        //const jobs=['nurse','cleaner','food maker','builder'];
+        //const count = this.bees.filter(b => b.job === j).length;
+        centerText('Nurse bees', { x: canvas.width * 1 / 6, y: 20 })
+        centerText('Cleaner bees', { x: canvas.width * 2 / 6, y: 20 })
+        centerText('Food maker bees', { x: canvas.width * 4 / 6, y: 20 })
+        centerText('Builder bees', { x: canvas.width * 5 / 6, y: 20 })
+
+        ctx.font='24px Verdana';
+        ctx.fillStyle = NURSE_BEE_COLOR; 
+        centerText(this.bees.filter(b => b.job === 'nurse').length, { x: canvas.width * 1 / 6, y: 50 })
+        ctx.fillStyle = CLEANER_BEE_COLOR; 
+        centerText(this.bees.filter(b => b.job === 'cleaner').length, { x: canvas.width * 2 / 6, y: 50 })
+        ctx.fillStyle = FOOD_MAKER_BEE_COLOR; 
+        centerText(this.bees.filter(b => b.job === 'food maker').length, { x: canvas.width * 4 / 6, y: 50 })
+        ctx.fillStyle = BUILDER_BEE_COLOR; 
+        centerText(this.bees.filter(b => b.job === 'builder').length, { x: canvas.width * 5 / 6, y: 50 })
+
+        ctx.fillStyle=GRAY; ctx.font='30px Verdana';
+        centerText('Total bees', { x: canvas.width * 3 / 6, y: 20 })
+        centerText(this.bees.length, { x: canvas.width * 3 / 6, y: 60 })
+      }
+    }
+
+    // Cell
+    class Cell {
+      constructor(row,col,type) {
+        this.row=row; this.col=col; this.type=type; this.state=type; this.progress=0;
+        const y=canvas.height/2+row*CELL_SIZE*3;
+        const x=canvas.width/2+(col*2+row%2)*CELL_SIZE*SQRT3;
+        this.center = {x,y}; 
+        this.rect = {x:x-SQRT3*CELL_SIZE,y:y-CELL_SIZE,width:2*SQRT3*CELL_SIZE,height:2*CELL_SIZE};
+        this.buttons = [
+          new Button(this,'Nursery',NURSE_BEE_COLOR,0,-25,()=>this.makeNursery()),
+          new Button(this,'Bee bread',FOOD_MAKER_BEE_COLOR,0,0,()=>this.requestBeeBread()),
+          new Button(this,'Honey',BUILDER_BEE_COLOR,0,25,()=>this.requestHoney())
+        ];
+      }
+      update() {
+        if (this.type==='bee bread'&&this.state==='bee bread') hive.requestFoodMaker(this);
+        else if (this.type==='honey'&&this.state==='honey') hive.requestFoodMaker(this);
+      }
+      makeNursery() {
+        this.type='nursery'; this.state='nursery';
+      }
+      requestBeeBread() {
+        this.type='bee bread'; hive.requestFoodMaker(this);
+      }
+      requestHoney() {
+        this.type='honey'; hive.requestFoodMaker(this);
+      }
+      draw() { 
+        if(this.type==='none') return;
+        let border=YELLOW_BG, bg=YELLOW_BG;
+        if (this.type === 'unbuilt') {
+          if(this.state === 'building') {
+            border=YELLOW_CELL2;
+            bg=YELLOW_CELL1;
+          } else if (this.state==='build requested') {
+            border=YELLOW_CELL1;
+            bg=YELLOW_CELL2;
+          }
+        }
+        else if(this.type==='nursery'){border=NURSE_BEE_COLOR; bg=YELLOW_CELL3;}
+        else if(this.type==='bee bread'){border=FOOD_MAKER_BEE_COLOR; bg=YELLOW_CELL3;}
+        else if(this.type==='honey'){border=BUILDER_BEE_COLOR; bg=YELLOW_CELL3;}
+        else { border=BUILDER_BEE_COLOR; bg=YELLOW_CELL1; }
+        if(this.state==='cleaner requested'||this.state==='cleaning') bg=LIGHT_GRAY;
+        const pts=hexagon(this.center,CELL_SIZE);
+        const inner_pts=hexagon(this.center, CELL_SIZE-2)
+        ctx.fillStyle=bg; ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle=border; ctx.lineWidth=7; ctx.beginPath(); inner_pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.closePath(); ctx.stroke();
+        ctx.strokeStyle=BLACK; ctx.lineWidth=1; ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.closePath(); ctx.stroke();
+        // build hint
+        if(this.type==='unbuilt'&&this.state==='unbuilt'){
+          ctx.fillStyle=LIGHT_GRAY; ctx.font='30px Verdana'; centerText('+', this.center);
+        }
+        if(this.state==='ready') this.buttons.forEach(b=>b.draw());
+        // egg/progress icons
+        if(['nursery with egg','nurse requested','nursing'].includes(this.state)){
+          ctx.fillStyle=WHITE; ctx.beginPath(); ctx.arc(this.center.x,this.center.y+CELL_SIZE,CELL_SIZE/4*(1+this.progress),0,2*Math.PI); ctx.fill(); }
+        if(this.type==='bee bread'&&this.state==='making food'){
+          const size=CELL_SIZE/4*(1+this.progress);
+          ctx.fillStyle=FOOD_MAKER_BEE_COLOR; ctx.fillRect(this.center.x-size/2,this.center.y+CELL_SIZE-size/2,size,size);
+        }
+        if(this.type==='honey'&&this.state==='making food'){
+          const size=CELL_SIZE/8*(1+this.progress);
+          const hpts=hexagon({x:this.center.x,y:this.center.y+CELL_SIZE},size);
+          ctx.fillStyle=BUILDER_BEE_COLOR; ctx.beginPath(); hpts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.closePath(); ctx.fill();
+        }
+      }
+      contains(px,py) {
+        const r=this.rect;
+        return px>=r.x&&px<=r.x+r.width&&py>=r.y&&py<=r.y+r.height;
+      }
+      handleClick(x,y) {
+        if(this.state==='unbuilt') hive.requestBuilder(this);
+        else if(this.state==='ready') this.buttons.forEach(b=>{ if(b.contains(x,y)) b.handleClick(); });
+      }
+    }
+
+    // Bee
+    class Bee {
+      constructor(x,y,job) {
+        this.center={x,y}; this.job=job; this.tasks=[]; this.task=null; this.isIdle=true;
+        this.timeSinceLastMeal=0; this.meals=0;
+        this.buttons = {
+          'unassigned': [
+            new Button(this,'(N)urse',NURSE_BEE_COLOR,0,-70,()=>this.makeNurse()), 
+            new Button(this,'(C)leaner',CLEANER_BEE_COLOR,0,-45,()=>this.makeCleaner()) 
+          ],
+          'unassigned2': [
+            new Button(this,'(F)ood Maker',FOOD_MAKER_BEE_COLOR,0,-70,()=>this.makeFoodMaker()),
+            new Button(this,'(B)uilder',BUILDER_BEE_COLOR,0,-45,()=>this.makeBuilder()) 
+          ]
+        };
+      }
+      makeNurse(){ this.job='nurse'; }
+      makeCleaner(){ this.job='cleaner'; }
+      makeFoodMaker(){ this.job='food maker'; }
+      makeBuilder(){ this.job='builder'; }
+      addTask(t){ this.isIdle=false; this.tasks.push(t); }
+      addTasks(ts){ this.isIdle=false; this.tasks.push(...ts); }
+      isBusy(){ return !this.isIdle; }
+      update() { 
+        this.timeSinceLastMeal++;
+        if (this.timeSinceLastMeal>20*FPS) {
+          hive.honey--; this.meals++; this.timeSinceLastMeal=0;
+        }
+        if (!this.task||this.task.isDone()) {
+          if (this.meals===3&&['nurse','cleaner'].includes(this.job)) {
+            this.job='unassigned2';
+            this.addTasks([ new TravelTo(randomInRect(jobRect)), new GetJob() ]);
+          } else if (this.meals === 6) {
+            this.addTasks([ new TravelTo(randomInRect(dieRect)), new Die() ]);
+          } if (!this.tasks.length) {
+            if(['unassigned','unassigned2'].includes(this.job)) {
+              this.task=null; this.isIdle=true;
+            } else {
+              hive.requestJob(this); 
+              if (!this.tasks.length) {
+                this.task = new TravelTo(randomInRect(idleRect));
+                this.task.start(this);
+                this.isIdle=true;
+              }
+            }
+          } else { 
+            this.task = this.tasks.shift();
+            this.task.start(this);
+          }
+        } else {
+          this.task.update();
+        }
+      }
+      draw() { 
+        let size=BEE_SIZE; let color=GRAY;
+        if(this.job==='nurse') color=NURSE_BEE_COLOR;
+        else if(this.job==='builder'){ color=BUILDER_BEE_COLOR; size*=1.2; }
+        else if(this.job==='cleaner') color=CLEANER_BEE_COLOR;
+        else if(this.job==='food maker'){ color=FOOD_MAKER_BEE_COLOR; size*=1.2; }
+        else if(this.job==='unassigned2'||this.job==='dying'){ size*=1.2; if(this.job==='dying') color=LIGHT_GRAY; }
+        // outer circle
+        ctx.fillStyle=YELLOW_BEE1; ctx.beginPath(); ctx.arc(this.center.x,this.center.y,size,0,2*Math.PI); ctx.fill();
+        // inner
+        ctx.fillStyle=color; ctx.beginPath(); ctx.arc(this.center.x,this.center.y,size/2,0,2*Math.PI); ctx.fill();
+        ctx.strokeStyle=BLACK; ctx.beginPath(); ctx.arc(this.center.x,this.center.y,size,0,2*Math.PI); ctx.stroke();
+        if (hive.debug) {
+          ctx.fillStyle=BLACK; ctx.font='12px Verdana'; centerText(this.id, this.center);
+        }
+        // unassigned buttons
+        if(['unassigned','unassigned2'].includes(this.job) && hive.isFirstBeeWaiting(this)){
+          this.buttons[this.job].forEach(b=>b.draw()); }
+      }
+      handleClick(x,y) { 
+        if(['unassigned','unassigned2'].includes(this.job)) {
+          this.buttons[this.job].forEach(b=>{ if(b.contains(x,y)) b.handleClick(); });
+        }
+      }
+    }
+
+    // QueenBee
+    class QueenBee {
+      constructor(x,y){ this.center={x,y}; }
+      update() { 
+        if(keys['ArrowUp']) this.center.y=Math.max(0,this.center.y-QB_SPEED);
+        if(keys['ArrowDown']) this.center.y=Math.min(canvas.height,this.center.y+QB_SPEED);
+        if(keys['ArrowLeft']) this.center.x=Math.max(0,this.center.x-QB_SPEED);
+        if(keys['ArrowRight']) this.center.x=Math.min(canvas.width,this.center.x+QB_SPEED);
+        if(keys['Enter']) hive.cells.forEach(c=>{ if(c.state==='nursery'&& distance(this.center,c.center)<CELL_SIZE){ c.state='nursery with egg'; hive.requestNurse(c); }});
+      }
+      draw(){ 
+        const size=BEE_SIZE*1.5;
+        ctx.fillStyle=YELLOW_BEE1; ctx.beginPath(); ctx.arc(this.center.x,this.center.y,size,0,2*Math.PI); ctx.fill();
+        ctx.fillStyle=BLACK; ctx.beginPath(); ctx.arc(this.center.x,this.center.y,size/2,0,2*Math.PI); ctx.fill();
+        ctx.strokeStyle=BLACK; ctx.beginPath(); ctx.arc(this.center.x,this.center.y,size,0,2*Math.PI); ctx.stroke();
+      }
+    }
+
+    // Input state
+    const keys={}; window.addEventListener('keydown', e => { keys[e.key]=true; });
+    window.addEventListener('keyup', e => {
+      keys[e.key]=false; 
+      if (e.key.toLowerCase()==='n') hive.assignJob('nurse'); 
+      else if (e.key.toLowerCase()==='c') hive.assignJob('cleaner'); 
+      else if (e.key.toLowerCase()==='f') hive.assignJob('food maker'); 
+      else if (e.key.toLowerCase()==='b') hive.assignJob('builder');
+      else if (e.key.toLowerCase()==='d') hive.debug=!hive.debug;
+    });
+
+    // Click handling
+    canvas.addEventListener('mousedown',e=>{ const x=e.clientX, y=e.clientY;
+      if(gameOver && startBtn.contains(x,y)) {
+        startBtn.handleClick();
+      } else if(pauseBtn.contains(x,y)) {
+        pauseBtn.handleClick();
+      }else {
+        hive.cells.forEach(c => c.contains(x, y) && c.handleClick(x,y));
+        hive.bees.forEach(b=>b.handleClick(x,y));
+      }
+    });
+
+    // Game setup & loop
+    let hive, queen, startBtn, pauseBtn, gameOver=false;
+    function init() { 
+      // cells
+      const cells=[]; 
+      const layout={"-3":[-2,2],"-2":[-3,4],"-1":[-4,4],"0":[-3,5],"1":[-3,4],"2":[-2,3],"3":[-2,2]};
+      Object.entries(layout).forEach(([r,range]) => { 
+        for(let c=range[0]; c<=range[1]; c++){ 
+          const t=(r==0&&c==0)||(r==1&&[-1,0].includes(c)) ? 'unbuilt' : 'none'; 
+          cells.push(new Cell(+r,c,t));
+        }
+      });
+      const bees=[ new Bee(100,100,'nurse'), new Bee(200,100,'builder'), new Bee(300,100,'cleaner'), new Bee(400,100,'food maker') ];
+      hive=new Hive(cells,bees); queen=new QueenBee(canvas.width-200,200);
+      startBtn=new Button(hive,'Start Over',NURSE_BEE_COLOR,0,40,init, 24);
+      pauseBtn=new Button(hive,'Pause', NURSE_BEE_COLOR, canvas.width/2-50, -canvas.height/2+20, () => hive.paused = !hive.paused, 20);
+    }
+    init();
+    function update() {
+      hive.cells.forEach(c=>c.update()); 
+      hive.bees.forEach(b=>b.update()); 
+      queen.update(); 
+      gameOver = hive.honey <= 0 || hive.beeBread <= 0 || !hive.bees.length;
+    }
+    function draw(){
+      ctx.fillStyle=YELLOW_BG; ctx.fillRect(0,0,canvas.width,canvas.height);
+      hive.enableCells(); // ensure new cells appear
+      hive.cells.forEach(c=>c.draw());
+      hive.bees.forEach(b=>b.draw());
+      queen.draw();
+      hive.draw();
+      pauseBtn.draw();
+      if (gameOver) {
+        ctx.fillStyle=BLACK; ctx.font='60px Verdana';
+        centerText('COLONY COLLAPSE', {x: canvas.width/2, y: canvas.height/2});
+        startBtn.draw();
+      }
+    }
+    function loop(ts) {
+      if (!hive.paused && !gameOver) {
+        update(); 
+      }
+      draw(); 
+      setTimeout(()=>requestAnimationFrame(loop),1000/FPS);
+    }
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
