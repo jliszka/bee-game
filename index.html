@@ -407,19 +407,15 @@
         this.timeSinceLastMeal=0; this.meals=0;
         this.buttons = {
           'unassigned': [
-            new Button(this,'(N)urse',NURSE_BEE_COLOR,0,-70,()=>this.makeNurse()), 
-            new Button(this,'(C)leaner',CLEANER_BEE_COLOR,0,-45,()=>this.makeCleaner()) 
+            new Button(this,'(N)urse',NURSE_BEE_COLOR,0,-70, () => hive.assignJob('nurse')), 
+            new Button(this,'(C)leaner',CLEANER_BEE_COLOR,0,-45, () => hive.assignJob('cleaner')) 
           ],
           'unassigned2': [
-            new Button(this,'(F)ood Maker',FOOD_MAKER_BEE_COLOR,0,-75,()=>this.makeFoodMaker()),
-            new Button(this,'(B)uilder',YELLOW_BEE1,0,-50,()=>this.makeBuilder()) 
+            new Button(this,'(F)ood Maker',FOOD_MAKER_BEE_COLOR,0,-75, () => hive.assignJob('food maker')),
+            new Button(this,'(B)uilder',YELLOW_BEE1,0,-50, () => hive.assignJob('builder')) 
           ]
         };
       }
-      makeNurse(){ this.job='nurse'; }
-      makeCleaner(){ this.job='cleaner'; }
-      makeFoodMaker(){ this.job='food maker'; }
-      makeBuilder(){ this.job='builder'; }
       addTask(t){ this.isIdle=false; this.tasks.push(t); }
       addTasks(ts){ this.isIdle=false; this.tasks.push(...ts); }
       isBusy(){ return !this.isIdle; }
