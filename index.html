@@ -559,7 +559,7 @@
       }
     }
     function loop(ts) {
-      gameOver = hive.honey <= 0 || hive.beeBread <= 0 || !hive.bees.length || hive.time > 120;
+      gameOver = hive.honey <= 0 || hive.beeBread <= 0 || !hive.bees.length;
       if (!hive.paused && !gameOver) {
         update(); 
       }
