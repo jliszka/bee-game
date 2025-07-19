@@ -308,14 +308,9 @@
 
         ctx.font='24px Verdana';
         const m = Math.floor(this.time / 60 / 60);
-        const s = Math.floor(this.time / 60);
+        const s = Math.floor(this.time / 60) % 60;
         const pad = s < 10 ? '0' : '';
         centerText(`${m}:${pad}${s}`, { x: canvas.width * 1 / 20, y: 30 })
-
-        ctx.fillStyle=BUILDER_BEE_COLOR; 
-        ctx.beginPath(); 
-        ctx.arc(0, canvas.height, canvas.height / 2, 0, Math.PI / 2, true);
-        ctx.fill();
       }
     }
 
@@ -323,10 +318,15 @@
     class Cell {
       constructor(row,col,type) {
         this.row=row; this.col=col; this.type=type; this.state=type; this.progress=0;
-        const y=canvas.height/2+row*CELL_SIZE*3;
-        const x=canvas.width/2+(col*2+mod(row, 2))*CELL_SIZE*SQRT3;
+        const y = canvas.height/2 + row*CELL_SIZE*3;
+        const x = canvas.width/2 + (col*2 + mod(row, 2))*CELL_SIZE*SQRT3;
         this.center = {x,y}; 
-        this.rect = {x:x-SQRT3*CELL_SIZE,y:y-CELL_SIZE,width:2*SQRT3*CELL_SIZE,height:2*CELL_SIZE};
+        this.rect = {
+          x: x-SQRT3*CELL_SIZE,
+          y: y-CELL_SIZE,
+          width: 2*SQRT3*CELL_SIZE,
+          height:2*CELL_SIZE
+        };
         this.buttons = [
           new Button(this,'Nursery',NURSE_BEE_COLOR,0,-25,()=>this.makeNursery()),
           new Button(this,'Bee bread',FOOD_MAKER_BEE_COLOR,0,0,()=>this.requestBeeBread()),
@@ -539,12 +539,17 @@
       queen.update(); 
       gameOver = hive.honey <= 0 || hive.beeBread <= 0 || !hive.bees.length;
     }
-    function draw(){
+    function draw() {
       ctx.fillStyle=YELLOW_BG; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle=BUILDER_BEE_COLOR; 
+      ctx.beginPath(); 
+      ctx.arc(0, canvas.height, canvas.height / 2, 0, Math.PI / 2, true);
+      ctx.fill();
+
       hive.enableCells(); // ensure new cells appear
-      hive.draw();
       hive.cells.forEach(c=>c.draw());
       hive.bees.forEach(b=>b.draw());
+      hive.draw();
       queen.draw();
       pauseBtn.draw();
       if (gameOver) {
