@@ -529,15 +529,15 @@
         }
       });
       const bees=[ new Bee(100,100,'nurse'), new Bee(200,100,'builder'), new Bee(300,100,'cleaner'), new Bee(400,100,'food maker') ];
-      hive=new Hive(cells,bees); queen=new QueenBee(canvas.width-200,200);
-      startBtn=new Button(hive,'Start Over',NURSE_BEE_COLOR,0,50,init, 24);
-      pauseBtn=new Button(hive,'Pause', NURSE_BEE_COLOR, canvas.width/2-50, -canvas.height/2+20, () => hive.paused = !hive.paused, 20);
+      hive=new Hive(cells,bees);
+      queen=new QueenBee(canvas.width-200,200);
+      startBtn=new Button(hive, 'Start Over', NURSE_BEE_COLOR, 0, 50, init, 24);
+      pauseBtn=new Button(hive, 'Pause', NURSE_BEE_COLOR, canvas.width/2-50, -canvas.height/2+20, () => hive.paused = !hive.paused, 20);
     }
     init();
     function update() {
       hive.update();
       queen.update(); 
-      gameOver = hive.honey <= 0 || hive.beeBread <= 0 || !hive.bees.length;
     }
     function draw() {
       ctx.fillStyle=YELLOW_BG; ctx.fillRect(0,0,canvas.width,canvas.height);
@@ -559,6 +559,7 @@
       }
     }
     function loop(ts) {
+      gameOver = hive.honey <= 0 || hive.beeBread <= 0 || !hive.bees.length || hive.time > 120;
       if (!hive.paused && !gameOver) {
         update(); 
       }
